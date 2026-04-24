@@ -7,8 +7,8 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.policy_models import PolicyCatalogEntry
-from app.services.policy_catalog import (
+from onehaven_platform.backend.src.policy_models import PolicyCatalogEntry
+from products.compliance.backend.src.services.policy_catalog import (
     PolicyCatalogItem,
     catalog_for_market,
     filter_official_catalog_items,

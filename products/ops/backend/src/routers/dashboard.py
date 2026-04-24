@@ -7,12 +7,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal
-from app.db import get_db
-from app.domain.workflow.panes import clamp_pane, pane_catalog
-from app.products.management.services.dashboard_rollups import compute_rollups
-from app.services.ownership import ensure_pane_access
-from app.products.investor_intelligence.services.pane_dashboard_service import (
+from onehaven_platform.backend.src.auth import get_principal
+from onehaven_platform.backend.src.db import get_db
+from onehaven_platform.backend.src.domain.workflow.panes import clamp_pane, pane_catalog
+from onehaven_platform.backend.src.services.dashboard_rollup_service import compute_rollups
+from onehaven_platform.backend.src.services.ownership import ensure_pane_access
+from products.intelligence.backend.src.services.pane_dashboard_service import (
     build_all_pane_summaries,
     build_pane_dashboard,
     build_portfolio_rollup_with_panes,

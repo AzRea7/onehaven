@@ -1,0 +1,100 @@
+{
+  "phase": 102,
+  "dry_run": false,
+  "files_changed": 23,
+  "replacements": 44,
+  "changed": [
+    {
+      "file": "onehaven_platform/backend/src/files/photos.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/files/property_photo_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/bsa_adapter.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/hud_user.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "replacements": 4
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/property_tax_enrichment_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/zillow.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "replacements": 3
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "replacements": 4
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/jurisdiction_tasks.py",
+      "replacements": 3
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/market_sync_tasks.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "replacements": 7
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_failure_task_service.py",
+      "replacements": 2
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_readiness_service.py",
+      "replacements": 3
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/photo_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/state_machine_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/workflow/automation_router.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/registry.py",
+      "replacements": 2
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/deal_intake.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/hqs_precheck_agent.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/rent_reasonableness_agent.py",
+      "replacements": 2
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/underwrite_agent.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/tax/adapters/bsa_adapter.py",
+      "replacements": 1
+    }
+  ]
+}

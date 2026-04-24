@@ -7,10 +7,10 @@ from typing import Any, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.audit import audit_write
-from app.domain.policy.defaults import defaults_for_michigan
-from app.models import JurisdictionRule
-from app.policy_models import PolicyAssertion
+from onehaven_platform.backend.src.domain.audit import audit_write
+from onehaven_platform.backend.src.domain.policy.defaults import defaults_for_michigan
+from onehaven_platform.backend.src.models import JurisdictionRule
+from onehaven_platform.backend.src.policy_models import PolicyAssertion
 
 SAFE_GOVERNANCE_STATES = {"active"}
 NON_PROJECTABLE_GOVERNANCE_STATES = {"draft", "replaced"}

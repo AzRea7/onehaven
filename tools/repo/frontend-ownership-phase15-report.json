@@ -1,0 +1,652 @@
+{
+  "phase": 15,
+  "description": "Frontend ownership planning report",
+  "legacy_root": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine",
+  "summary": {
+    "app": 3,
+    "platform": 12,
+    "product": 26,
+    "package": 14,
+    "manual_split": 2,
+    "unclear": 21,
+    "products": {
+      "intelligence": 5,
+      "acquire": 0,
+      "compliance": 14,
+      "tenants": 2,
+      "ops": 7
+    }
+  },
+  "records": [
+    {
+      "source": "frontend/src/App.tsx",
+      "bucket": "app",
+      "target": "apps/suite-web/src/app/App.tsx",
+      "confidence": "high",
+      "reason": "explicit_mapping",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AgentRunCompare.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AgentRunHistory.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AgentRunsPanel.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AgentSlots.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AnimatedBackdrop.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/AnimatedBackdrop.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:animatedbackdrop",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AppFooter.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/AppFooter.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:appfooter",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AppHeader.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/AppHeader.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:appheader",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AppSelect.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/AppSelect.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:appselect",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AppShell.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/AppShell.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:appshell",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/Artwork.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/Artwork.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:artwork",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AuroraBackground.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/AuroraBackground.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:aurorabackground",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/EmptyState.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/EmptyState.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:emptystate",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/FilterBar.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/FilterBar.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:filterbar",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/GlassCard.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/GlassCard.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:glasscard",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/GlobalFilters.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/Golem.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/Golem.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:golem",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/IngestionErrorsDrawer.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:drawer",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/IngestionLaunchCard.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/IngestionRunsPanel.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/IngestionSourcesPanel.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/KpiCard.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/KpiCard.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:kpicard",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/MarketSourcePackModal.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/PageHero.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/PageHero.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:pagehero",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/PageShell.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/PageShell.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:shell",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/PaneSwitcher.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:paneswitcher",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/RehabFromPhotosCTA.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/Shell.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/Shell.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:shell",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/Spinner.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/Spinner.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:spinner",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/StatCard.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/StatCard.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:statcard",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/StatPill.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/StatPill.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:statpill",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/Surface.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/Surface.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:surface",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/VirtualList.tsx",
+      "bucket": "package",
+      "target": "packages/ui/src/components/VirtualList.tsx",
+      "confidence": "medium",
+      "reason": "matched_package_keyword:virtuallist",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/lib/api.ts",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/lib/auth.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/auth/auth.tsx",
+      "confidence": "high",
+      "reason": "explicit_mapping",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/lib/authFlow.ts",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/auth/authFlow.ts",
+      "confidence": "high",
+      "reason": "explicit_mapping",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/lib/dealRules.ts",
+      "bucket": "product",
+      "target": "products/intelligence/frontend/src/dealRules.ts",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:deal",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "frontend/src/lib/filters.ts",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/lib/ingestionClient.ts",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/main.tsx",
+      "bucket": "app",
+      "target": "apps/suite-web/src/bootstrap/main.tsx",
+      "confidence": "high",
+      "reason": "explicit_mapping",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/Agents.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/AgentsPanel.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/Constitution.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/ImportsPage.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/JurisdictionProfiles.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/pages/JurisdictionProfiles.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:jurisdiction",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/pages/Jurisdictions.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/pages/Jurisdictions.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:jurisdiction",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/pages/Login.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/auth/Login.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:login",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/PolicyReview.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/pages/PolicyReview.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/pages/Property.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/Register.tsx",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/frontend/src/auth/Register.tsx",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:register",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/products/compliance/components/ComplianceDocumentStack.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/ComplianceDocumentStack.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/ComplianceDocumentUploader.tsx",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:compliance;matched_platform:upload",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/CompliancePhotoFindingsPanel.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/CompliancePhotoFindingsPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/ComplianceReminderPanel.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/ComplianceReminderPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/InspectionReadiness.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/InspectionReadiness.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/InspectionSchedulerModal.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/InspectionSchedulerModal.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/InspectionTimelineCard.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/InspectionTimelineCard.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/JurisdictionCoverageBadge.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/JurisdictionCoverageBadge.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/PropertyJurisdictionRulesPanel.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "bucket": "product",
+      "target": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/investor_intelligence/components/PaneSummaryCards.tsx",
+      "bucket": "product",
+      "target": "products/intelligence/frontend/src/components/PaneSummaryCards.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:investor_intelligence",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "frontend/src/products/investor_intelligence/components/RiskBadges.tsx",
+      "bucket": "product",
+      "target": "products/intelligence/frontend/src/components/RiskBadges.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:investor_intelligence",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "frontend/src/products/investor_intelligence/components/ShortlistBoard.tsx",
+      "bucket": "product",
+      "target": "products/intelligence/frontend/src/components/ShortlistBoard.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:investor_intelligence",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "frontend/src/products/investor_intelligence/pages/InvestorPane.tsx",
+      "bucket": "product",
+      "target": "products/intelligence/frontend/src/pages/InvestorPane.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:investor_intelligence",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "frontend/src/products/management/components/NextActionsPanel.tsx",
+      "bucket": "product",
+      "target": "products/ops/frontend/src/components/NextActionsPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:management",
+      "matched_product": "ops"
+    },
+    {
+      "source": "frontend/src/products/management/components/PhotoGallery.tsx",
+      "bucket": "product",
+      "target": "products/ops/frontend/src/components/PhotoGallery.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:management",
+      "matched_product": "ops"
+    },
+    {
+      "source": "frontend/src/products/management/components/PhotoUploader.tsx",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:management;matched_platform:upload",
+      "matched_product": "ops"
+    },
+    {
+      "source": "frontend/src/products/management/components/PropertyImage.tsx",
+      "bucket": "product",
+      "target": "products/ops/frontend/src/components/PropertyImage.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:management",
+      "matched_product": "ops"
+    },
+    {
+      "source": "frontend/src/products/management/components/StageProgress.tsx",
+      "bucket": "product",
+      "target": "products/ops/frontend/src/components/StageProgress.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:management",
+      "matched_product": "ops"
+    },
+    {
+      "source": "frontend/src/products/management/pages/Dashboard.tsx",
+      "bucket": "product",
+      "target": "products/ops/frontend/src/pages/Dashboard.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:management",
+      "matched_product": "ops"
+    },
+    {
+      "source": "frontend/src/products/management/pages/ManagementPane.tsx",
+      "bucket": "product",
+      "target": "products/ops/frontend/src/pages/ManagementPane.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:management",
+      "matched_product": "ops"
+    },
+    {
+      "source": "frontend/src/products/tenant/components/TenantPipeline.tsx",
+      "bucket": "product",
+      "target": "products/tenants/frontend/src/components/TenantPipeline.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:tenant",
+      "matched_product": "tenants"
+    },
+    {
+      "source": "frontend/src/products/tenant/pages/TenantsPane.tsx",
+      "bucket": "product",
+      "target": "products/tenants/frontend/src/pages/TenantsPane.tsx",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:tenant",
+      "matched_product": "tenants"
+    },
+    {
+      "source": "frontend/src/styles/globals.css",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/styles/motion.css",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/styles/tokens.css",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/styles.css",
+      "bucket": "app",
+      "target": "apps/suite-web/src/app/styles.css",
+      "confidence": "high",
+      "reason": "explicit_mapping",
+      "matched_product": null
+    }
+  ],
+  "next_steps": [
+    "Review manual_split files first",
+    "Review unclear files second",
+    "Move high-confidence app/platform/package files next",
+    "Move product-owned frontend batches after that"
+  ]
+}

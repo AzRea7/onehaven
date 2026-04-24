@@ -8,19 +8,19 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import (
+from onehaven_platform.backend.src.domain.policy.categories import (
     compute_tier_coverage,
     expected_rule_universe_for_scope,
     normalize_categories,
 )
-from app.products.compliance.services.policy_coverage.completeness_service import (
+from products.compliance.backend.src.services.policy_coverage.completeness_service import (
     build_category_assessments,
     collect_covered_categories_for_scope,
     compute_jurisdiction_score_breakdown,
     compute_scope_freshness_summary,
     evaluate_jurisdiction_trust_decision,
 )
-from app.policy_models import JurisdictionCoverageStatus, PolicyAssertion, PolicySource
+from onehaven_platform.backend.src.policy_models import JurisdictionCoverageStatus, PolicyAssertion, PolicySource
 
 
 AUTHORITY_TIER_RANKS: dict[str, int] = {
@@ -29,9 +29,9 @@ AUTHORITY_TIER_RANKS: dict[str, int] = {
     "approved_official_supporting": 85,
     "authoritative_official": 100,
 }
-from app.products.compliance.services.policy_sources.catalog_admin_service import merged_catalog_for_market
-from app.products.compliance.services.policy_assertions.cleanup_service import ARCHIVE_MARKER
-from app.products.compliance.services.policy_sources.source_service import _is_rejected_discovered_source
+from products.compliance.backend.src.services.policy_sources.catalog_admin_service import merged_catalog_for_market
+from products.compliance.backend.src.services.policy_assertions.cleanup_service import ARCHIVE_MARKER
+from products.compliance.backend.src.services.policy_sources.source_service import _is_rejected_discovered_source
 
 
 

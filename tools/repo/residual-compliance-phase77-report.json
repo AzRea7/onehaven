@@ -1,0 +1,96 @@
+{
+  "phase": 77,
+  "dry_run": false,
+  "summary": {
+    "would_remove": 0,
+    "removed": 9,
+    "skipped": 8
+  },
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/__init__.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/__pycache__/__init__.cpython-312.pyc",
+      "status": "skipped",
+      "reason": "unmapped"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__init__.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/__init__.cpython-312.pyc",
+      "status": "skipped",
+      "reason": "unmapped"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/compliance_document_service.cpython-312.pyc",
+      "status": "skipped",
+      "reason": "unmapped"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/compliance_photo_analysis_service.cpython-312.pyc",
+      "status": "skipped",
+      "reason": "unmapped"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/compliance_service.cpython-312.pyc",
+      "status": "skipped",
+      "reason": "unmapped"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/workflow_gate_service.cpython-312.pyc",
+      "status": "skipped",
+      "reason": "unmapped"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_photo_analysis_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__init__.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__pycache__/__init__.cpython-312.pyc",
+      "status": "skipped",
+      "reason": "unmapped"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__pycache__/pipeline_service.cpython-312.pyc",
+      "status": "skipped",
+      "reason": "unmapped"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "status": "removed",
+      "reason": "identical"
+    }
+  ]
+}

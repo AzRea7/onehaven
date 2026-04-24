@@ -1,0 +1,49 @@
+{
+  "phase": 57,
+  "priority": "medium",
+  "group_count": 2,
+  "groups": [
+    {
+      "prefix": "onehaven_decision_engine/backend/app/services",
+      "count": 16,
+      "priority_mix": {
+        "medium": 16
+      },
+      "owner_mix": {
+        "service": 16
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/services/geocode_cache_service.py",
+        "onehaven_decision_engine/backend/app/services/geocoding_service.py",
+        "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
+        "onehaven_decision_engine/backend/app/services/property_normalization_service.py",
+        "onehaven_decision_engine/backend/app/services/trust_service.py",
+        "onehaven_decision_engine/backend/app/services/shared/__init__.py",
+        "onehaven_decision_engine/backend/app/services/tax/base.py",
+        "onehaven_decision_engine/backend/app/services/tax/cache.py",
+        "onehaven_decision_engine/backend/app/services/tax/fallbacks.py",
+        "onehaven_decision_engine/backend/app/services/tax/registry.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/domain",
+      "count": 8,
+      "priority_mix": {
+        "medium": 8
+      },
+      "owner_mix": {
+        "domain": 8
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/domain/__init__.py",
+        "onehaven_decision_engine/backend/app/domain/compliance/__init__.py",
+        "onehaven_decision_engine/backend/app/domain/importers/__init__.py",
+        "onehaven_decision_engine/backend/app/domain/policy/__init__.py",
+        "onehaven_decision_engine/backend/app/domain/section8/rent_rules.py",
+        "onehaven_decision_engine/backend/app/domain/shared/__init__.py",
+        "onehaven_decision_engine/backend/app/domain/workflow/panes.py",
+        "onehaven_decision_engine/backend/app/domain/workflow/stages.py"
+      ]
+    }
+  ]
+}

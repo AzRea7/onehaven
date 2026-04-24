@@ -6,9 +6,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Property
-from app.services.crime_index import compute_crime_metrics
-from app.services.offender_index import compute_offender_metrics
+from onehaven_platform.backend.src.models import Property
+from products.intelligence.backend.src.services.crime_index import compute_crime_metrics
+from products.intelligence.backend.src.services.offender_index import compute_offender_metrics
 
 DEFAULT_OFFENDER_RADIUS_MILES = 0.75
 

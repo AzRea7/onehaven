@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+
+class PhotoContract(Protocol):
+    def list_property_photos(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]: ...
+    def create_property_photo(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...
+    def delete_property_photo(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...

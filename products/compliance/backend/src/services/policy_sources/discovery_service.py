@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import expected_rule_universe_for_scope, normalize_categories
+from onehaven_platform.backend.src.domain.policy.categories import expected_rule_universe_for_scope, normalize_categories
 
 
 AUTHORITY_POLICY_BY_TIER: dict[str, dict[str, Any]] = {
@@ -20,8 +20,8 @@ AUTHORITY_POLICY_BY_TIER: dict[str, dict[str, Any]] = {
     "semi_authoritative_operational": {"use_type": "supporting", "binding_sufficient": False, "supporting_only": True, "usable": True},
     "derived_or_inferred": {"use_type": "weak", "binding_sufficient": False, "supporting_only": False, "usable": False},
 }
-from app.policy_models import PolicyDiscoveryAttempt, PolicySource, PolicySourceInventory
-from app.services.policy_change_detection_service import compute_next_retry_due
+from onehaven_platform.backend.src.policy_models import PolicyDiscoveryAttempt, PolicySource, PolicySourceInventory
+from products.compliance.backend.src.services.policy_change_detection_service import compute_next_retry_due
 
 
 DEFAULT_DISCOVERY_RETRY_DAYS = 3
@@ -1275,8 +1275,8 @@ _DISCOVERY_DISCOVERED = "discovered"
 
 def _safe_import_step2_services():
     try:
-        from app.services.jurisdiction_source_family_service import get_source_families_for_jurisdiction
-        from app.services.jurisdiction_registry_service import (
+        from products.compliance.backend.src.services.jurisdiction_source_family_service import get_source_families_for_jurisdiction
+        from products.compliance.backend.src.services.jurisdiction_registry_service import (
             find_jurisdiction_by_id,
             find_jurisdiction_by_slug,
             get_or_create_jurisdiction,

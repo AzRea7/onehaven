@@ -1,0 +1,1622 @@
+{
+  "phase": 92,
+  "summary": {
+    "total_edges": 660,
+    "allowed_edges": 522,
+    "disallowed_edges": 138,
+    "files_with_disallowed_edges": 55
+  },
+  "edge_pairs": [
+    {
+      "from": "compliance",
+      "to": "platform",
+      "count": 293
+    },
+    {
+      "from": "intelligence",
+      "to": "platform",
+      "count": 78
+    },
+    {
+      "from": "ops",
+      "to": "platform",
+      "count": 45
+    },
+    {
+      "from": "acquire",
+      "to": "platform",
+      "count": 41
+    },
+    {
+      "from": "platform",
+      "to": "intelligence",
+      "count": 29
+    },
+    {
+      "from": "platform",
+      "to": "compliance",
+      "count": 27
+    },
+    {
+      "from": "app",
+      "to": "platform",
+      "count": 26
+    },
+    {
+      "from": "compliance",
+      "to": "intelligence",
+      "count": 22
+    },
+    {
+      "from": "acquire",
+      "to": "intelligence",
+      "count": 13
+    },
+    {
+      "from": "app",
+      "to": "compliance",
+      "count": 13
+    },
+    {
+      "from": "tenants",
+      "to": "platform",
+      "count": 12
+    },
+    {
+      "from": "platform",
+      "to": "acquire",
+      "count": 12
+    },
+    {
+      "from": "compliance",
+      "to": "acquire",
+      "count": 10
+    },
+    {
+      "from": "ops",
+      "to": "intelligence",
+      "count": 9
+    },
+    {
+      "from": "app",
+      "to": "intelligence",
+      "count": 6
+    },
+    {
+      "from": "intelligence",
+      "to": "compliance",
+      "count": 5
+    },
+    {
+      "from": "app",
+      "to": "ops",
+      "count": 4
+    },
+    {
+      "from": "ops",
+      "to": "acquire",
+      "count": 3
+    },
+    {
+      "from": "app",
+      "to": "acquire",
+      "count": 3
+    },
+    {
+      "from": "acquire",
+      "to": "compliance",
+      "count": 2
+    },
+    {
+      "from": "intelligence",
+      "to": "acquire",
+      "count": 2
+    },
+    {
+      "from": "intelligence",
+      "to": "ops",
+      "count": 2
+    },
+    {
+      "from": "tenants",
+      "to": "compliance",
+      "count": 1
+    },
+    {
+      "from": "platform",
+      "to": "ops",
+      "count": 1
+    },
+    {
+      "from": "app",
+      "to": "tenants",
+      "count": 1
+    }
+  ],
+  "top_modules": [
+    {
+      "module": "onehaven_platform.backend.src.models",
+      "count": 94
+    },
+    {
+      "module": "onehaven_platform.backend.src.db",
+      "count": 49
+    },
+    {
+      "module": "onehaven_platform.backend.src.auth",
+      "count": 48
+    },
+    {
+      "module": "onehaven_platform.backend.src.policy_models",
+      "count": 44
+    },
+    {
+      "module": "onehaven_platform.backend.src.config",
+      "count": 26
+    },
+    {
+      "module": "onehaven_platform.backend.src.schemas",
+      "count": 25
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service",
+      "count": 19
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.state_machine_service",
+      "count": 18
+    },
+    {
+      "module": "onehaven_platform.backend.src.domain.policy.categories",
+      "count": 18
+    },
+    {
+      "module": "onehaven_platform.backend.src.domain.audit",
+      "count": 10
+    },
+    {
+      "module": "products.intelligence.backend.src.services.zillow_photo_source",
+      "count": 9
+    },
+    {
+      "module": "products.intelligence.backend.src.services.market_catalog_service",
+      "count": 9
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.stage_guard_service",
+      "count": 9
+    },
+    {
+      "module": "products.intelligence.backend.src.services.market_sync_service",
+      "count": 8
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.events_facade",
+      "count": 8
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.inspection_readiness_service",
+      "count": 7
+    },
+    {
+      "module": "products.intelligence.backend.src.services.risk_scoring",
+      "count": 7
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.inspection_failure_task_service",
+      "count": 6
+    },
+    {
+      "module": "products.acquire.backend.src.services.ingestion_run_service",
+      "count": 6
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.ownership",
+      "count": 6
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.geo_enrichment",
+      "count": 5
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.photo_service",
+      "count": 5
+    },
+    {
+      "module": "products.compliance.backend.src.services",
+      "count": 5
+    },
+    {
+      "module": "onehaven_platform.backend.src.domain.agents.llm_router",
+      "count": 5
+    },
+    {
+      "module": "products.acquire.backend.src.services.ingestion_source_service",
+      "count": 5
+    },
+    {
+      "module": "onehaven_platform.backend.src.domain.events",
+      "count": 5
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.virus_scanning_service",
+      "count": 4
+    },
+    {
+      "module": "products.intelligence.backend.src.services.rentcast_service",
+      "count": 4
+    },
+    {
+      "module": "products.compliance.backend.src.services.policy_governance.refresh_service",
+      "count": 4
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.agent_engine",
+      "count": 4
+    },
+    {
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service",
+      "count": 4
+    },
+    {
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+      "count": 4
+    },
+    {
+      "module": "onehaven_platform.backend.src.domain.policy.defaults",
+      "count": 4
+    },
+    {
+      "module": "onehaven_platform.backend.src.observability.runtime_metrics",
+      "count": 4
+    },
+    {
+      "module": "products.intelligence.backend.src.domain.rent_learning",
+      "count": 4
+    },
+    {
+      "module": "onehaven_platform.backend.src.domain.section8.rent_rules",
+      "count": 4
+    },
+    {
+      "module": "products.intelligence.backend.src.domain.underwriting",
+      "count": 4
+    },
+    {
+      "module": "products.compliance.backend.src.services.workflow_gate_service",
+      "count": 4
+    },
+    {
+      "module": "products.compliance.backend.src.services.compliance_photo_analysis_service",
+      "count": 4
+    },
+    {
+      "module": "onehaven_platform.backend.src.middleware.structured_logging",
+      "count": 3
+    },
+    {
+      "module": "products.acquire.backend.src.services.ingestion_enrichment_service",
+      "count": 3
+    },
+    {
+      "module": "products.acquire.backend.src.services.ingestion_run_execute",
+      "count": 3
+    },
+    {
+      "module": "products.acquire.backend.src.services.ingestion_scheduler_service",
+      "count": 3
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.dashboard_rollup_service",
+      "count": 3
+    },
+    {
+      "module": "onehaven_platform.backend.src.domain.workflow.panes",
+      "count": 3
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.jurisdiction_scoring_service",
+      "count": 3
+    },
+    {
+      "module": "products.ops.backend.src.services.properties.inventory_snapshot_service",
+      "count": 3
+    },
+    {
+      "module": "products.acquire.backend.src.services.acquisition_tag_service",
+      "count": 3
+    },
+    {
+      "module": "onehaven_platform.backend.src.domain.fingerprint",
+      "count": 2
+    },
+    {
+      "module": "products.intelligence.backend.src.domain.importers.investorlift",
+      "count": 2
+    }
+  ],
+  "disallowed_by_file": [
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "imports": [
+        "products.acquire.backend.src.services.ingestion_enrichment_service",
+        "products.acquire.backend.src.services.ingestion_run_execute",
+        "products.acquire.backend.src.services.ingestion_run_service",
+        "products.acquire.backend.src.services.ingestion_scheduler_service",
+        "products.acquire.backend.src.services.ingestion_source_service"
+      ],
+      "count": 9
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "imports": [
+        "products.compliance.backend.src.services.compliance_document_service",
+        "products.compliance.backend.src.services.compliance_photo_analysis_service",
+        "products.compliance.backend.src.services.workflow_gate_service"
+      ],
+      "count": 5
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "imports": [
+        "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+        "products.intelligence.backend.src.services.property_tax_enrichment_service",
+        "products.intelligence.backend.src.services.rentcast_service",
+        "products.intelligence.backend.src.services.risk_scoring"
+      ],
+      "count": 9
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/ops_adapter.py",
+      "imports": [
+        "products.ops.backend.src.services.properties.inventory_snapshot_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/deal_intake.py",
+      "imports": [
+        "products.compliance.backend.src.services.jurisdiction_profile_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/hqs_precheck_agent.py",
+      "imports": [
+        "products.compliance.backend.src.domain.inspection.hqs_library"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/rent_reasonableness_agent.py",
+      "imports": [
+        "products.intelligence.backend.src.domain.rent_learning",
+        "products.intelligence.backend.src.services.hud_fmr_service"
+      ],
+      "count": 2
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/underwrite_agent.py",
+      "imports": [
+        "products.intelligence.backend.src.domain.underwriting"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/registry.py",
+      "imports": [
+        "products.compliance.backend.src.domain.inspection.hqs_library",
+        "products.intelligence.backend.src.services.hud_fmr_service"
+      ],
+      "count": 2
+    },
+    {
+      "file": "onehaven_platform/backend/src/files/photos.py",
+      "imports": [
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/files/property_photo_service.py",
+      "imports": [
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/bsa_adapter.py",
+      "imports": [
+        "products.intelligence.backend.src.services.public_tax_lookup_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/hud_user.py",
+      "imports": [
+        "products.intelligence.backend.src.services.fmr"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "imports": [
+        "products.acquire.backend.src.services.ingestion_run_service",
+        "products.intelligence.backend.src.services.market_catalog_service",
+        "products.intelligence.backend.src.services.market_sync_service",
+        "products.intelligence.backend.src.services.portfolio_watchlist_service"
+      ],
+      "count": 4
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/property_tax_enrichment_service.py",
+      "imports": [
+        "products.intelligence.backend.src.services.property_price_resolution_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/zillow.py",
+      "imports": [
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "imports": [
+        "products.compliance.backend.src.services.policy_governance.refresh_service",
+        "products.intelligence.backend.src.services.market_catalog_service",
+        "products.intelligence.backend.src.services.market_sync_service"
+      ],
+      "count": 3
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "imports": [
+        "products.acquire.backend.src.services.ingestion_enrichment_service",
+        "products.compliance.backend.src.services.policy_governance.notification_service",
+        "products.compliance.backend.src.services.policy_governance.refresh_service",
+        "products.intelligence.backend.src.services.market_sync_service",
+        "products.intelligence.backend.src.services.rent_refresh_queue_service"
+      ],
+      "count": 5
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/jurisdiction_tasks.py",
+      "imports": [
+        "products.compliance.backend.src.services.policy_coverage.health_service",
+        "products.compliance.backend.src.services.policy_governance.notification_service",
+        "products.compliance.backend.src.services.policy_governance.refresh_service"
+      ],
+      "count": 3
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/market_sync_tasks.py",
+      "imports": [
+        "products.intelligence.backend.src.services.market_sync_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "imports": [
+        "products.compliance.backend.src.services.compliance_document_service",
+        "products.compliance.backend.src.services.compliance_photo_analysis_service",
+        "products.compliance.backend.src.services.compliance_service",
+        "products.compliance.backend.src.services.workflow_gate_service"
+      ],
+      "count": 7
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_failure_task_service.py",
+      "imports": [
+        "products.compliance.backend.src.domain.inspection.inspection_mapping",
+        "products.compliance.backend.src.domain.inspection.top_fail_points"
+      ],
+      "count": 2
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_readiness_service.py",
+      "imports": [
+        "products.compliance.backend.src.domain.inspection.hqs",
+        "products.compliance.backend.src.domain.inspection.inspection_rules",
+        "products.compliance.backend.src.services.inspection_scheduling_service"
+      ],
+      "count": 3
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/photo_service.py",
+      "imports": [
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/state_machine_service.py",
+      "imports": [
+        "products.acquire.backend.src.services.acquisition_tag_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/tax/adapters/bsa_adapter.py",
+      "imports": [
+        "products.intelligence.backend.src.services.public_tax_lookup_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/workflow/automation_router.py",
+      "imports": [
+        "products.compliance.backend.src.services.inspection_scheduling_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "imports": [
+        "products.intelligence.backend.src.domain.importers.investorlift",
+        "products.intelligence.backend.src.domain.importers.zillow",
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 3
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "imports": [
+        "products.compliance.backend.src.services",
+        "products.intelligence.backend.src.routers.evaluate",
+        "products.intelligence.backend.src.routers.rent",
+        "products.intelligence.backend.src.services.rent_refresh_queue_service",
+        "products.intelligence.backend.src.services.rentcast_service"
+      ],
+      "count": 5
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "imports": [
+        "products.intelligence.backend.src.services.market_sync_service",
+        "products.intelligence.backend.src.services.rentcast_listing_source"
+      ],
+      "count": 2
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "imports": [
+        "products.compliance.backend.src.services.policy_governance.refresh_service",
+        "products.intelligence.backend.src.services.market_catalog_service",
+        "products.intelligence.backend.src.services.market_sync_service"
+      ],
+      "count": 3
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_source_service.py",
+      "imports": [
+        "products.intelligence.backend.src.services.market_catalog_service"
+      ],
+      "count": 2
+    },
+    {
+      "file": "products/compliance/backend/src/routers/geo.py",
+      "imports": [
+        "products.intelligence.backend.src.services.risk_scoring"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "imports": [
+        "products.acquire.backend.src.services.ingestion_enrichment_service",
+        "products.acquire.backend.src.services.ingestion_run_service",
+        "products.acquire.backend.src.services.ingestion_source_service",
+        "products.intelligence.backend.src.domain.importers.investorlift",
+        "products.intelligence.backend.src.domain.importers.zillow",
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 6
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "imports": [
+        "products.acquire.backend.src.services.ingestion_run_execute",
+        "products.acquire.backend.src.services.ingestion_run_service",
+        "products.acquire.backend.src.services.ingestion_scheduler_service",
+        "products.acquire.backend.src.services.ingestion_source_service",
+        "products.intelligence.backend.src.services.market_catalog_service",
+        "products.intelligence.backend.src.services.market_sync_service",
+        "products.intelligence.backend.src.services.portfolio_watchlist_service",
+        "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+        "products.intelligence.backend.src.services.property_tax_enrichment_service"
+      ],
+      "count": 9
+    },
+    {
+      "file": "products/compliance/backend/src/routers/markets.py",
+      "imports": [
+        "products.intelligence.backend.src.services.market_catalog_service",
+        "products.intelligence.backend.src.services.market_sync_service"
+      ],
+      "count": 2
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "imports": [
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "imports": [
+        "products.acquire.backend.src.services.csv_import_mapping_service",
+        "products.acquire.backend.src.services.document_ingestion_router_service",
+        "products.acquire.backend.src.services.portfolio_ingestion_service"
+      ],
+      "count": 3
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "imports": [
+        "products.intelligence.backend.src.domain.rent_learning",
+        "products.intelligence.backend.src.domain.underwriting"
+      ],
+      "count": 2
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "imports": [
+        "products.intelligence.backend.src.domain.rent_learning",
+        "products.intelligence.backend.src.domain.underwriting",
+        "products.intelligence.backend.src.services.fmr",
+        "products.intelligence.backend.src.services.rentcast_service"
+      ],
+      "count": 4
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "imports": [
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/ingestion_source_service.py",
+      "imports": [
+        "products.intelligence.backend.src.services.market_catalog_service"
+      ],
+      "count": 2
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_photo_service.py",
+      "imports": [
+        "products.intelligence.backend.src.services.zillow_photo_source"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/deal_intake.py",
+      "imports": [
+        "products.compliance.backend.src.services.jurisdiction_profile_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "imports": [
+        "products.compliance.backend.src.services"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "imports": [
+        "products.compliance.backend.src.services"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "imports": [
+        "products.compliance.backend.src.services.trust_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/intelligence/backend/src/services/deal_intelligence_service.py",
+      "imports": [
+        "products.compliance.backend.src.services.compliance_engine.brief_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "imports": [
+        "products.acquire.backend.src.services.ingestion_scheduler_service",
+        "products.acquire.backend.src.services.ingestion_source_service"
+      ],
+      "count": 2
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "imports": [
+        "products.ops.backend.src.services.properties.inventory_snapshot_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "imports": [
+        "products.ops.backend.src.services.properties.inventory_snapshot_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "imports": [
+        "products.intelligence.backend.src.services.pane_dashboard_service"
+      ],
+      "count": 1
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "imports": [
+        "products.acquire.backend.src.services.acquisition_participant_service",
+        "products.acquire.backend.src.services.acquisition_tag_service",
+        "products.intelligence.backend.src.domain.rent_learning",
+        "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+        "products.intelligence.backend.src.services.property_price_resolution_service",
+        "products.intelligence.backend.src.services.property_tax_enrichment_service"
+      ],
+      "count": 6
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "imports": [
+        "products.acquire.backend.src.services.acquisition_tag_service",
+        "products.intelligence.backend.src.domain.underwriting",
+        "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+        "products.intelligence.backend.src.services.property_tax_enrichment_service",
+        "products.intelligence.backend.src.services.risk_scoring"
+      ],
+      "count": 5
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "imports": [
+        "products.compliance.backend.src.services"
+      ],
+      "count": 1
+    }
+  ],
+  "disallowed_edges": [
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.importers.investorlift"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.importers.zillow"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rent_refresh_queue_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.evaluate"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.rent"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_listing_source"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.policy_governance.refresh_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_source_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_source_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/geo.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.importers.investorlift"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.importers.zillow"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_enrichment_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_execute"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_scheduler_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.portfolio_watchlist_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/markets.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/markets.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.csv_import_mapping_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.document_ingestion_router_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.portfolio_ingestion_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.rent_learning"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.underwriting"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.fmr"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.rent_learning"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.underwriting"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_photo_service.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/ingestion_source_service.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/ingestion_source_service.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/deal_intake.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.jurisdiction_profile_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.trust_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/deal_intelligence_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_engine.brief_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_scheduler_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.services.properties.inventory_snapshot_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.services.properties.inventory_snapshot_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.pane_dashboard_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.acquisition_tag_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.acquisition_participant_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_price_resolution_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.rent_learning"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.underwriting"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.acquisition_tag_service"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_execute"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_scheduler_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_execute"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_enrichment_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.workflow_gate_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.workflow_gate_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_document_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_photo_analysis_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_photo_analysis_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/ops_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.services.properties.inventory_snapshot_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/files/photos.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "onehaven_platform/backend/src/files/property_photo_service.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/bsa_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.public_tax_lookup_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/hud_user.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.fmr"
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.portfolio_watchlist_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/property_tax_enrichment_service.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_price_resolution_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/zillow.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.policy_governance.refresh_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_enrichment_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.policy_governance.notification_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.policy_governance.refresh_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rent_refresh_queue_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/jurisdiction_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.policy_coverage.health_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/jurisdiction_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.policy_governance.notification_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/jurisdiction_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.policy_governance.refresh_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/market_sync_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.workflow_gate_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.workflow_gate_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_document_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_photo_analysis_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_photo_analysis_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_failure_task_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.domain.inspection.inspection_mapping"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_failure_task_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.domain.inspection.top_fail_points"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_readiness_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.domain.inspection.hqs"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_readiness_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.domain.inspection.inspection_rules"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/inspection_readiness_service.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.inspection_scheduling_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/photo_service.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/state_machine_service.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.acquisition_tag_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/workflow/automation_router.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.inspection_scheduling_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/registry.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.hud_fmr_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/registry.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.domain.inspection.hqs_library"
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/deal_intake.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.jurisdiction_profile_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/hqs_precheck_agent.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.domain.inspection.hqs_library"
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/rent_reasonableness_agent.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.hud_fmr_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/rent_reasonableness_agent.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.rent_learning"
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/impl/underwrite_agent.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.underwriting"
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/tax/adapters/bsa_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.public_tax_lookup_service"
+    }
+  ]
+}

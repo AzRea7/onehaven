@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Tenant, Unit
+from onehaven_platform.backend.src.models import Tenant, Unit
 
 
 def _score_tenant_to_unit(tenant: Tenant, unit: Unit) -> float:

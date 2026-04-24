@@ -1,0 +1,138 @@
+{
+  "phase": 24,
+  "lane": "inspections",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 18,
+  "would_move_count": 0,
+  "moved_count": 13,
+  "skipped_count": 5,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "target": "products/compliance/backend/src/services/inspections/hqs_precheck_agent.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/checklist_templates.py",
+      "target": "products/compliance/backend/src/services/inspections/checklist_templates.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs.py",
+      "target": "products/compliance/backend/src/services/inspections/hqs.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs_library.py",
+      "target": "products/compliance/backend/src/services/inspections/hqs_library.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_mapping.py",
+      "target": "products/compliance/backend/src/services/inspections/inspection_mapping.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_rules.py",
+      "target": "products/compliance/backend/src/services/inspections/inspection_rules.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/photo_to_hqs_mapper.py",
+      "target": "products/compliance/backend/src/services/inspections/photo_to_hqs_mapper.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "target": "products/compliance/backend/src/services/inspections/inspections.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/inspection_risk_service.py",
+      "target": "products/compliance/backend/src/services/inspections/inspection_risk_service.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/__init__.py",
+      "target": "products/compliance/backend/src/services/inspections/__init__.py",
+      "area": "inspections",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/failure_task_service.py",
+      "target": "products/compliance/backend/src/services/inspections/failure_task_service.py",
+      "area": "inspections",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/import_nspire_service.py",
+      "target": "products/compliance/backend/src/services/inspections/import_nspire_service.py",
+      "area": "inspections",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/readiness_service.py",
+      "target": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "area": "inspections",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/template_service.py",
+      "target": "products/compliance/backend/src/services/inspections/template_service.py",
+      "area": "inspections",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspection_scheduling_service.py",
+      "target": "products/compliance/backend/src/services/inspections/inspection_scheduling_service.py",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionReadiness.tsx",
+      "target": "products/compliance/backend/src/services/inspections/InspectionReadiness.tsx",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionSchedulerModal.tsx",
+      "target": "products/compliance/backend/src/services/inspections/InspectionSchedulerModal.tsx",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionTimelineCard.tsx",
+      "target": "products/compliance/backend/src/services/inspections/InspectionTimelineCard.tsx",
+      "area": "inspections",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ]
+}

@@ -55,35 +55,35 @@ APP_DIRS = [
 ]
 
 PLATFORM_BACKEND_DIRS = [
-    "platform/backend/src/identity/domain",
-    "platform/backend/src/identity/application",
-    "platform/backend/src/identity/interfaces",
-    "platform/backend/src/identity/infrastructure",
-    "platform/backend/src/orgs",
-    "platform/backend/src/billing",
-    "platform/backend/src/usage",
-    "platform/backend/src/audit",
-    "platform/backend/src/notifications",
-    "platform/backend/src/files",
-    "platform/backend/src/workflow",
-    "platform/backend/src/search",
-    "platform/backend/src/jobs",
-    "platform/backend/src/observability",
-    "platform/backend/src/integrations",
-    "platform/backend/src/config",
-    "platform/backend/src/db",
-    "platform/backend/src/shared_kernel",
+    "onehaven_onehaven_platform/backend/src/identity/domain",
+    "onehaven_onehaven_platform/backend/src/identity/application",
+    "onehaven_onehaven_platform/backend/src/identity/interfaces",
+    "onehaven_onehaven_platform/backend/src/identity/infrastructure",
+    "onehaven_onehaven_platform/backend/src/orgs",
+    "onehaven_onehaven_platform/backend/src/billing",
+    "onehaven_onehaven_platform/backend/src/usage",
+    "onehaven_onehaven_platform/backend/src/audit",
+    "onehaven_onehaven_platform/backend/src/notifications",
+    "onehaven_onehaven_platform/backend/src/files",
+    "onehaven_onehaven_platform/backend/src/workflow",
+    "onehaven_onehaven_platform/backend/src/search",
+    "onehaven_onehaven_platform/backend/src/jobs",
+    "onehaven_onehaven_platform/backend/src/observability",
+    "onehaven_onehaven_platform/backend/src/integrations",
+    "onehaven_onehaven_platform/backend/src/config",
+    "onehaven_onehaven_platform/backend/src/db",
+    "onehaven_onehaven_platform/backend/src/shared_kernel",
 ]
 
 PLATFORM_FRONTEND_DIRS = [
-    "platform/frontend/src/auth",
-    "platform/frontend/src/shell",
-    "platform/frontend/src/navigation",
-    "platform/frontend/src/org-context",
-    "platform/frontend/src/permissions",
-    "platform/frontend/src/notifications",
-    "platform/frontend/src/file-upload",
-    "platform/frontend/src/telemetry",
+    "onehaven_onehaven_platform/frontend/src/auth",
+    "onehaven_onehaven_platform/frontend/src/shell",
+    "onehaven_onehaven_platform/frontend/src/navigation",
+    "onehaven_onehaven_platform/frontend/src/org-context",
+    "onehaven_onehaven_platform/frontend/src/permissions",
+    "onehaven_onehaven_platform/frontend/src/notifications",
+    "onehaven_onehaven_platform/frontend/src/file-upload",
+    "onehaven_onehaven_platform/frontend/src/telemetry",
 ]
 
 PLATFORM_CONTRACT_DIRS = [
@@ -304,37 +304,37 @@ MAPPING_RULES: list[MappingRule] = [
     ),
     MappingRule(
         source="onehaven_decision_engine/backend/app/auth.py",
-        destination="platform/backend/src/identity/interfaces",
+        destination="onehaven_onehaven_platform/backend/src/identity/interfaces",
         kind="manual",
         notes="Likely split across identity/config/shared kernel.",
     ),
     MappingRule(
         source="onehaven_decision_engine/backend/app/config.py",
-        destination="platform/backend/src/config",
+        destination="onehaven_onehaven_platform/backend/src/config",
         kind="tree",
         notes="Platform-owned config.",
     ),
     MappingRule(
         source="onehaven_decision_engine/backend/app/db.py",
-        destination="platform/backend/src/db",
+        destination="onehaven_onehaven_platform/backend/src/db",
         kind="tree",
         notes="Platform-owned db bootstrap.",
     ),
     MappingRule(
         source="onehaven_decision_engine/backend/app/logging_config.py",
-        destination="platform/backend/src/observability",
+        destination="onehaven_onehaven_platform/backend/src/observability",
         kind="tree",
         notes="Platform-owned logging/observability.",
     ),
     MappingRule(
         source="onehaven_decision_engine/backend/app/middleware",
-        destination="platform/backend/src/observability",
+        destination="onehaven_onehaven_platform/backend/src/observability",
         kind="tree",
         notes="Likely split across observability/identity.",
     ),
     MappingRule(
         source="onehaven_decision_engine/backend/app/routers/auth.py",
-        destination="platform/backend/src/identity/interfaces",
+        destination="onehaven_onehaven_platform/backend/src/identity/interfaces",
         kind="manual",
         notes="Suite/platform auth entrypoint.",
     ),
@@ -358,13 +358,13 @@ MAPPING_RULES: list[MappingRule] = [
     ),
     MappingRule(
         source="onehaven_decision_engine/frontend/src/components",
-        destination="platform/frontend/src/shell",
+        destination="onehaven_onehaven_platform/frontend/src/shell",
         kind="manual",
         notes="Must be split into platform shell vs packages/ui vs product UI.",
     ),
     MappingRule(
         source="onehaven_decision_engine/frontend/src/lib/auth.tsx",
-        destination="platform/frontend/src/auth",
+        destination="onehaven_onehaven_platform/frontend/src/auth",
         kind="tree",
         notes="Platform auth client.",
     ),
@@ -590,7 +590,7 @@ def write_placeholder_app_files(repo_root: Path, force: bool) -> None:
             "  - apps/*\n"
             "  - products/*/frontend\n"
             "  - packages/*\n"
-            "  - platform/frontend\n"
+            "  - onehaven_platform/frontend\n"
         ),
         "turbo.json": '{\n  "$schema": "https://turbo.build/schema.json",\n  "tasks": {}\n}\n',
     }

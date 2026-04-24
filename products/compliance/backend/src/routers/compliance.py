@@ -9,10 +9,10 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal, require_owner
-from app.db import get_db
-from app.domain.compliance.compliance_completion import compute_compliance_status
-from app.models import (
+from onehaven_platform.backend.src.auth import get_principal, require_owner
+from onehaven_platform.backend.src.db import get_db
+from onehaven_platform.backend.src.services.compliance_completion_service import compute_compliance_status
+from onehaven_platform.backend.src.models import (
     AppUser,
     AuditEvent,
     ChecklistTemplateItem,
@@ -22,7 +22,7 @@ from app.models import (
     PropertyChecklistItem,
     WorkflowEvent,
 )
-from app.schemas import (
+from onehaven_platform.backend.src.schemas import (
     ChecklistItemOut,
     ChecklistItemUpdateIn,
     ChecklistOut,
@@ -30,13 +30,13 @@ from app.schemas import (
     ChecklistTemplateItemUpsert,
     PropertyChecklistOut,
 )
-from app.products.compliance.services.compliance_document_service import (
+from products.compliance.backend.src.services import (
     create_compliance_document_from_upload,
     delete_compliance_document,
     get_compliance_document,
     list_compliance_documents,
 )
-from app.products.compliance.services.compliance_service import (
+from products.compliance.backend.src.services.compliance_service import (
     apply_inspection_form_results,
     build_property_document_stack_snapshot,
     build_property_inspection_readiness,
@@ -44,30 +44,30 @@ from app.products.compliance.services.compliance_service import (
     preview_property_inspection_template,
     run_hqs as run_hqs_service,
 )
-from app.products.compliance.services.inspections.failure_task_service import (
+from onehaven_platform.backend.src.services.inspection_failure_task_service import (
     build_failure_next_actions,
     create_failure_tasks_from_inspection,
 )
-from app.products.compliance.services.inspections.readiness_service import build_property_readiness_summary
-from app.services.inspection_scheduling_service import (
+from onehaven_platform.backend.src.services.inspection_readiness_service import build_property_readiness_summary
+from products.compliance.backend.src.services.inspection_scheduling_service import (
     build_inspection_timeline,
     build_property_schedule_summary,
 )
-from app.services.inspector_communication_service import build_inspector_contact_payload
-from app.products.compliance.services.policy_governance.notification_service import (
+from products.compliance.backend.src.services.inspector_communication_service import build_inspector_contact_payload
+from products.compliance.backend.src.services.policy_governance.notification_service import (
     build_impacted_property_notifications,
     notify_impacted_properties_for_rule_change,
 )
-from app.services.jurisdiction_profile_service import resolve_operational_policy
-from app.products.compliance.services.compliance_engine.projection_service import (
+from products.compliance.backend.src.services.jurisdiction_profile_service import resolve_operational_policy
+from onehaven_platform.backend.src.services.compliance_projection_service import (
     build_property_compliance_brief,
     build_property_projection_snapshot,
     rebuild_property_projection,
     sync_document_evidence_for_property,
 )
-from app.products.management.services.properties.state_machine import sync_property_state
-from app.services.stage_guard import require_stage
-from app.products.compliance.services.workflow_gate_service import build_workflow_summary
+from onehaven_platform.backend.src.services.state_machine_service import sync_property_state
+from onehaven_platform.backend.src.services.stage_guard_service import require_stage
+from products.compliance.backend.src.services import build_workflow_summary
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 

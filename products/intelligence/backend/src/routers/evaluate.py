@@ -9,17 +9,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal
-from app.config import settings
-from app.db import get_db
-from app.domain.decision_engine import score_and_decide
-from app.domain.events import emit_workflow_event
-from app.domain.jurisdiction_scoring import compute_friction
-from app.domain.underwriting import underwrite
-from app.models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
-from app.schemas import UnderwritingResultOut
+from onehaven_platform.backend.src.auth import get_principal
+from onehaven_platform.backend.src.config import settings
+from onehaven_platform.backend.src.db import get_db
+from products.intelligence.backend.src.domain.decision_engine import score_and_decide
+from onehaven_platform.backend.src.domain.events import emit_workflow_event
+from onehaven_platform.backend.src.services.jurisdiction_scoring_service import compute_friction
+from products.intelligence.backend.src.domain.underwriting import underwrite
+from onehaven_platform.backend.src.models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
+from onehaven_platform.backend.src.schemas import UnderwritingResultOut
 
-from app.routers.rent import explain_rent
+from products.intelligence.backend.src.routers.rent import explain_rent
 
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 

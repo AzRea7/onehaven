@@ -1,0 +1,166 @@
+{
+  "phase": 76,
+  "summary": {
+    "total": 17,
+    "identical": 9,
+    "different": 0,
+    "missing_target": 0,
+    "unmapped": 8,
+    "already_migrated": 0
+  },
+  "audits": [
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/__init__.py",
+      "target": "products/compliance/backend/src/__init__.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "target_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/__pycache__/__init__.cpython-312.pyc",
+      "target": null,
+      "status": "unmapped",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "cd2b02ec24582293a0b705112b859f00008211288d48450ac6960e100e959970",
+      "target_hash": null
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__init__.py",
+      "target": "products/compliance/backend/src/services/__init__.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "target_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/__init__.cpython-312.pyc",
+      "target": null,
+      "status": "unmapped",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "9e94b93683c6c1dc6b15736afc882600f05ca85d4c60847a0ecf7424274b8fd4",
+      "target_hash": null
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/compliance_document_service.cpython-312.pyc",
+      "target": null,
+      "status": "unmapped",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "4bb8faa84bc6ed565203112b3346cf02b08ee427593ccae07451ba4e387e6823",
+      "target_hash": null
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/compliance_photo_analysis_service.cpython-312.pyc",
+      "target": null,
+      "status": "unmapped",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "d7a34b3d2562d71ecb880b8f9ed69c2fd40e7bf3efcfbf9929a2f502e4032428",
+      "target_hash": null
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/compliance_service.cpython-312.pyc",
+      "target": null,
+      "status": "unmapped",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "88f1b6504ae9bfdc62fc04bdfd99df1e1e5683758e76e569030683eaac4d2e58",
+      "target_hash": null
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__pycache__/workflow_gate_service.cpython-312.pyc",
+      "target": null,
+      "status": "unmapped",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "c6186b3e5ebb080ce96ef47d1d85d904d405352d3f74b4ccb4c307d5c1917b89",
+      "target_hash": null
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+      "target": "products/compliance/backend/src/services/compliance_document_service.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "0793b5b733775d82335c08a4129dae5b2fdf5b27ffb418259227c0e0b07065c0",
+      "target_hash": "0793b5b733775d82335c08a4129dae5b2fdf5b27ffb418259227c0e0b07065c0"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_photo_analysis_service.py",
+      "target": "products/compliance/backend/src/services/compliance_photo_analysis_service.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "73e02ebccbfe6f2a6b18418e190b6c297239904ecbb821782f393a4456bbcd94",
+      "target_hash": "73e02ebccbfe6f2a6b18418e190b6c297239904ecbb821782f393a4456bbcd94"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "target": "products/compliance/backend/src/services/compliance_service.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "72a261487900c1a0c37ea066895956f77082eb82ec639e26246cf7b66d520fde",
+      "target_hash": "72a261487900c1a0c37ea066895956f77082eb82ec639e26246cf7b66d520fde"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__init__.py",
+      "target": "products/compliance/backend/src/services/policy_pipeline/__init__.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "target_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__pycache__/__init__.cpython-312.pyc",
+      "target": null,
+      "status": "unmapped",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "d12b26169c5611aa5b32208666e033174613c7942d1ad99723b9f83320f11db5",
+      "target_hash": null
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__pycache__/pipeline_service.cpython-312.pyc",
+      "target": null,
+      "status": "unmapped",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "fa2b221f27fc17593e2a8b73b9918cfb468a2a2ccbba2a0715d5e52ee7061c00",
+      "target_hash": null
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "target": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "d0abc284b0edc86ade5d06536c5c513b11e674621349bbf8b967ea1d5382c8b6",
+      "target_hash": "d0abc284b0edc86ade5d06536c5c513b11e674621349bbf8b967ea1d5382c8b6"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "target": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "9ae4d3acbae043956f0653ef60ecbb541af6b5797d05127ac0cb996c39fb1736",
+      "target_hash": "9ae4d3acbae043956f0653ef60ecbb541af6b5797d05127ac0cb996c39fb1736"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "target": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "status": "identical",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "9d7304d2558491ae8bad0eda4d8788f4bd843ddd5b17ec1c303931c12042b644",
+      "target_hash": "9d7304d2558491ae8bad0eda4d8788f4bd843ddd5b17ec1c303931c12042b644"
+    }
+  ]
+}

@@ -1,0 +1,382 @@
+{
+  "phase": 28,
+  "file_count": 53,
+  "summary": {
+    "components": 9,
+    "pages": 2,
+    "manual_review": 42
+  },
+  "records": [
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Artwork.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AuroraBackground.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/EmptyState.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/FilterBar.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlassCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionSourcesPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/KpiCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/MarketSourcePackModal.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageHero.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageShell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PaneSwitcher.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/RehabFromPhotosCTA.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Spinner.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatPill.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Surface.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/VirtualList.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Register.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_compliance_frontend_keyword_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceDocumentStack.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/ComplianceDocumentStack.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:ComplianceDocumentStack"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceDocumentUploader.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/ComplianceDocumentUploader.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:ComplianceDocumentUploader"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/CompliancePhotoFindingsPanel.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/CompliancePhotoFindingsPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:CompliancePhotoFindingsPanel"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceReminderPanel.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/ComplianceReminderPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:ComplianceReminderPanel"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionReadiness.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/InspectionReadiness.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:InspectionReadiness"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionSchedulerModal.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/InspectionSchedulerModal.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:InspectionSchedulerModal"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionTimelineCard.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/InspectionTimelineCard.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:InspectionTimelineCard"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/JurisdictionCoverageBadge.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/JurisdictionCoverageBadge.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:JurisdictionCoverageBadge"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "area": "pages",
+      "suggested_target": "products/compliance/frontend/src/pages/PropertyCompliancePanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:CompliancePane"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyJurisdictionRulesPanel.tsx",
+      "area": "components",
+      "suggested_target": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:PropertyJurisdictionRulesPanel"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "area": "pages",
+      "suggested_target": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:CompliancePane"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "phase": 60,
+  "dry_run": false,
+  "remove_legacy": false,
+  "summary": {
+    "would_move": 0,
+    "moved": 2,
+    "skipped": 1
+  },
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+      "target": "onehaven_onehaven_platform/backend/src/agents/agent_runs_router.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "target": "onehaven_onehaven_platform/backend/src/agents/agents_router.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/meta.py",
+      "target": "apps/suite-api/app/api/health/meta.py",
+      "status": "skipped",
+      "reason": "target_exists"
+    }
+  ]
+}

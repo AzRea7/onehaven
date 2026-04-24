@@ -1,0 +1,159 @@
+{
+  "phase": 65,
+  "dry_run": false,
+  "remove_legacy": false,
+  "summary": {
+    "would_move": 0,
+    "moved": 21,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AuroraBackground.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/EmptyState.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/EmptyState.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/FilterBar.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/FilterBar.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlassCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/GlassCard.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/GlobalFilters.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Golem.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionLaunchCard.tsx",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionRunsPanel.tsx",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionSourcesPanel.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionSourcesPanel.tsx",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/KpiCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/KpiCard.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/MarketSourcePackModal.tsx",
+      "target": "products/compliance/frontend/src/components/MarketSourcePackModal.tsx",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageHero.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PageHero.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageShell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PageShell.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PaneSwitcher.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PaneSwitcher.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Shell.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Spinner.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Spinner.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/StatCard.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatPill.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/StatPill.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Surface.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Surface.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/VirtualList.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/VirtualList.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "phase": 59,
+  "dry_run": false,
+  "summary": {
+    "would_remove": 0,
+    "removed": 10,
+    "skipped": 3
+  },
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+      "status": "skipped",
+      "reason": "missing_target"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "status": "skipped",
+      "reason": "missing_target"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/api_keys.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/auth.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/automation.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/geo.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/health.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports_alias.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ingestion.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/meta.py",
+      "status": "skipped",
+      "reason": "missing_target"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent.py",
+      "status": "removed",
+      "reason": "identical"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "phase": "18.5",
+  "dry_run": false,
+  "phase18_hit_count_before": 65,
+  "rewrite_file_count": 2,
+  "rewrites": [
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/investor_intelligence/pages/InvestorPane.tsx",
+      "replacements": [
+        {
+          "rule": "alias_components_to_package",
+          "pattern": "([\"\\'])@/components/",
+          "replacement": "\\1packages/ui/src/components/",
+          "count": "3"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/frontend/src/pages/InvestorPane.tsx",
+      "replacements": [
+        {
+          "rule": "alias_components_to_package",
+          "pattern": "([\"\\'])@/components/",
+          "replacement": "\\1packages/ui/src/components/",
+          "count": "3"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+
+  --tint-a: 255 88 122;
+  --tint-b: 120 90 255;
+  --tint-c: 35 255 200;
+
+  --bg0: 5 6 10;
+  --fg0: 244 244 245;
+  --fg1: 212 212 216;
+  --fg2: 148 163 184;
+
+  --ring: 99 102 241;
+}
+
+a,
+button,
+[role="button"],
+summary,
+select,
+option,
+label,
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: pointer;
+}
+
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+textarea {
+  cursor: text;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: rgb(var(--bg0));
+  color: rgb(var(--fg0));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+}
+
+::selection {
+  background: rgba(var(--ring) / 0.35);
+}

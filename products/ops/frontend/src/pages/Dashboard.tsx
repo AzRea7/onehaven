@@ -7,14 +7,14 @@ import {
   Wallet,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
-import PageHero from "@/components/PageHero";
-import PageShell from "@/components/PageShell";
-import Surface from "@/components/Surface";
-import KpiCard from "@/components/KpiCard";
+import PageHero from "onehaven_onehaven_platform/frontend/src/shell/PageHero";
+import PageShell from "onehaven_onehaven_platform/frontend/src/shell/PageShell";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
+import KpiCard from "packages/ui/onehaven_onehaven_platform/frontend/src/components/KpiCard";
 import { api } from "@/lib/api";
-import Golem from "@/components/Golem";
-import PaneSwitcher from "@/components/PaneSwitcher";
-import PaneSummaryCards from "@/products/investor_intelligence/components/PaneSummaryCards";
+import Golem from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Golem";
+import PaneSwitcher from "onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher";
+import PaneSummaryCards from "products/intelligence/frontend/src/components/PaneSummaryCards";
 
 type PaneOverviewPayload = {
   ok?: boolean;

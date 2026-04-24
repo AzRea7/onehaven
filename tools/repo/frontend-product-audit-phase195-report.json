@@ -1,0 +1,300 @@
+{
+  "phase": "19.5",
+  "selected_product": "all",
+  "summary": {
+    "total": 26,
+    "identical": 26,
+    "different": 0,
+    "missing_target": 0,
+    "already_migrated": 0,
+    "missing_both": 0
+  },
+  "audits": [
+    {
+      "product": "intelligence",
+      "source": "frontend/src/lib/dealRules.ts",
+      "target": "products/intelligence/frontend/src/dealRules.ts",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "436f764b780ddb9fb7ffc69c2294c064ab45e98de25bc14ad52f7f8d039aa80b",
+      "target_hash": "436f764b780ddb9fb7ffc69c2294c064ab45e98de25bc14ad52f7f8d039aa80b",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/pages/JurisdictionProfiles.tsx",
+      "target": "products/compliance/frontend/src/pages/JurisdictionProfiles.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "86f2ba61e0494e3465ac0d458a53607d1b2577a83e223b010a834ac691d34612",
+      "target_hash": "86f2ba61e0494e3465ac0d458a53607d1b2577a83e223b010a834ac691d34612",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/pages/Jurisdictions.tsx",
+      "target": "products/compliance/frontend/src/pages/Jurisdictions.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "80a6167412b9be8cb7e7f5bb2acc905977ceb3660e9bd8596742d9bd703afba4",
+      "target_hash": "80a6167412b9be8cb7e7f5bb2acc905977ceb3660e9bd8596742d9bd703afba4",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/pages/PolicyReview.tsx",
+      "target": "products/compliance/frontend/src/pages/PolicyReview.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "7ad288af3126d346ae8949bf4328d9cb29447e4d54f472035f87d121b049a218",
+      "target_hash": "7ad288af3126d346ae8949bf4328d9cb29447e4d54f472035f87d121b049a218",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/ComplianceDocumentStack.tsx",
+      "target": "products/compliance/frontend/src/components/ComplianceDocumentStack.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "0975ba2ea0c56f0e4a9dec333e4daebc99810d0f6c06f96c04fb8d84a6a24da0",
+      "target_hash": "0975ba2ea0c56f0e4a9dec333e4daebc99810d0f6c06f96c04fb8d84a6a24da0",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/CompliancePhotoFindingsPanel.tsx",
+      "target": "products/compliance/frontend/src/components/CompliancePhotoFindingsPanel.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "5ed49ff41cc2cefef526b7bce6da66a03097632196aff8e6f729ffa50ba88b42",
+      "target_hash": "5ed49ff41cc2cefef526b7bce6da66a03097632196aff8e6f729ffa50ba88b42",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/ComplianceReminderPanel.tsx",
+      "target": "products/compliance/frontend/src/components/ComplianceReminderPanel.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "ecce15b0afb6d892b3b0f72e839ca399fb2ca37e6f0bef818512e2c758644717",
+      "target_hash": "ecce15b0afb6d892b3b0f72e839ca399fb2ca37e6f0bef818512e2c758644717",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/InspectionReadiness.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionReadiness.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "d7f2b3a1a5f4af100f1a19e54e8d3165867186027c01593e2d41aeee60ff22b5",
+      "target_hash": "d7f2b3a1a5f4af100f1a19e54e8d3165867186027c01593e2d41aeee60ff22b5",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/InspectionSchedulerModal.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionSchedulerModal.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "ff79a5c0e79c7826b309e94f844691d439a106c8a37696351d8c88c141f37f72",
+      "target_hash": "ff79a5c0e79c7826b309e94f844691d439a106c8a37696351d8c88c141f37f72",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/InspectionTimelineCard.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionTimelineCard.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "cb442e939943b88b4ce44a98b2ef5bea87c81b9f15b2b15fdf008eb626b9ce73",
+      "target_hash": "cb442e939943b88b4ce44a98b2ef5bea87c81b9f15b2b15fdf008eb626b9ce73",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/JurisdictionCoverageBadge.tsx",
+      "target": "products/compliance/frontend/src/components/JurisdictionCoverageBadge.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "ee7be31b9fe2cc7ec65d44b329f2bbe74fcdad667af7e7b12bed91116de8e4e4",
+      "target_hash": "ee7be31b9fe2cc7ec65d44b329f2bbe74fcdad667af7e7b12bed91116de8e4e4",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "target": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "3e5b441a30b80db5d12fb48be4fca95a1e5242cfa10d4fd32d1976b072cadbec",
+      "target_hash": "3e5b441a30b80db5d12fb48be4fca95a1e5242cfa10d4fd32d1976b072cadbec",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/components/PropertyJurisdictionRulesPanel.tsx",
+      "target": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "a59e76280a3a080b9348e5fe7a3ccaacdfbdeee122d1409a1ce443b8ca5f075f",
+      "target_hash": "a59e76280a3a080b9348e5fe7a3ccaacdfbdeee122d1409a1ce443b8ca5f075f",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "compliance",
+      "source": "frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "target": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "18446e0bb885722cd33242beeef35ba008dbd795dccd35b681095475eb3497e3",
+      "target_hash": "18446e0bb885722cd33242beeef35ba008dbd795dccd35b681095475eb3497e3",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "intelligence",
+      "source": "frontend/src/products/investor_intelligence/components/PaneSummaryCards.tsx",
+      "target": "products/intelligence/frontend/src/components/PaneSummaryCards.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "c27fc627ba637d80ddca24a8c862fb1fe51b9945c6005c5f1db0e887d9e3a992",
+      "target_hash": "c27fc627ba637d80ddca24a8c862fb1fe51b9945c6005c5f1db0e887d9e3a992",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "intelligence",
+      "source": "frontend/src/products/investor_intelligence/components/RiskBadges.tsx",
+      "target": "products/intelligence/frontend/src/components/RiskBadges.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "c37702cbc9e0b815772661728d9722277f0d82f3678e39405ca261dfa15046cc",
+      "target_hash": "c37702cbc9e0b815772661728d9722277f0d82f3678e39405ca261dfa15046cc",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "intelligence",
+      "source": "frontend/src/products/investor_intelligence/components/ShortlistBoard.tsx",
+      "target": "products/intelligence/frontend/src/components/ShortlistBoard.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "f5a4603773395e8630bfeadad2ba08b039a244013a32b004886c992e30abf525",
+      "target_hash": "f5a4603773395e8630bfeadad2ba08b039a244013a32b004886c992e30abf525",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "intelligence",
+      "source": "frontend/src/products/investor_intelligence/pages/InvestorPane.tsx",
+      "target": "products/intelligence/frontend/src/pages/InvestorPane.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "68b5ea94e0845c054f3eeafaad707cd8f27eaf7506b16c929e66b42ef968ad5c",
+      "target_hash": "68b5ea94e0845c054f3eeafaad707cd8f27eaf7506b16c929e66b42ef968ad5c",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "ops",
+      "source": "frontend/src/products/management/components/NextActionsPanel.tsx",
+      "target": "products/ops/frontend/src/components/NextActionsPanel.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "c614fadecbc4484329577cdeb2fe133ad9696548fb34ac95affbc8dea1d8d544",
+      "target_hash": "c614fadecbc4484329577cdeb2fe133ad9696548fb34ac95affbc8dea1d8d544",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "ops",
+      "source": "frontend/src/products/management/components/PhotoGallery.tsx",
+      "target": "products/ops/frontend/src/components/PhotoGallery.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "6bb1195bca5af9b9090da9e0ae7eaddce9f448713ca65e791c05847e0f02a5c0",
+      "target_hash": "6bb1195bca5af9b9090da9e0ae7eaddce9f448713ca65e791c05847e0f02a5c0",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "ops",
+      "source": "frontend/src/products/management/components/PropertyImage.tsx",
+      "target": "products/ops/frontend/src/components/PropertyImage.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "b7c07f8636a9ec0824a4c526ddc31dd67f088cc31658bc605417d56e3be6e535",
+      "target_hash": "b7c07f8636a9ec0824a4c526ddc31dd67f088cc31658bc605417d56e3be6e535",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "ops",
+      "source": "frontend/src/products/management/components/StageProgress.tsx",
+      "target": "products/ops/frontend/src/components/StageProgress.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "e25f092eb4fbfcaa553856cde250074f6adaffe4e0ef23697a51544c9358b19f",
+      "target_hash": "e25f092eb4fbfcaa553856cde250074f6adaffe4e0ef23697a51544c9358b19f",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "ops",
+      "source": "frontend/src/products/management/pages/Dashboard.tsx",
+      "target": "products/ops/frontend/src/pages/Dashboard.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "bcd82e296707651eff09aadede751c8e13c7119eb1ef5ed868df2acd5be47df5",
+      "target_hash": "bcd82e296707651eff09aadede751c8e13c7119eb1ef5ed868df2acd5be47df5",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "ops",
+      "source": "frontend/src/products/management/pages/ManagementPane.tsx",
+      "target": "products/ops/frontend/src/pages/ManagementPane.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "76647da2ef200623bce8f34200ab91213a9429d89bebfa67ba9e1432385d510b",
+      "target_hash": "76647da2ef200623bce8f34200ab91213a9429d89bebfa67ba9e1432385d510b",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "tenants",
+      "source": "frontend/src/products/tenant/components/TenantPipeline.tsx",
+      "target": "products/tenants/frontend/src/components/TenantPipeline.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "3d525db9e0b9118c189c0e87dadf318b7474e00f647ae86f3a4998f1ecdf8a40",
+      "target_hash": "3d525db9e0b9118c189c0e87dadf318b7474e00f647ae86f3a4998f1ecdf8a40",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "product": "tenants",
+      "source": "frontend/src/products/tenant/pages/TenantsPane.tsx",
+      "target": "products/tenants/frontend/src/pages/TenantsPane.tsx",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "698ce423045368cea3f6b482b254184158fcff04f7d7d2fac810361fd0bcca83",
+      "target_hash": "698ce423045368cea3f6b482b254184158fcff04f7d7d2fac810361fd0bcca83",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    }
+  ]
+}

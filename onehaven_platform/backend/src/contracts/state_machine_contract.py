@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+
+class StateMachineContract(Protocol):
+    def get_state_payload(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...
+    def get_transition_payload(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...
+    def transition_property_state(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...

@@ -8,10 +8,10 @@ from typing import Any, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import normalize_category, normalize_categories
-from app.policy_models import PolicyAssertion, PolicySource, PolicySourceVersion
-from app.services.policy_rule_normalizer import normalize_rule_candidate
-from app.products.compliance.services.policy_assertions.validation_service import validate_assertion
+from onehaven_platform.backend.src.domain.policy.categories import normalize_category, normalize_categories
+from onehaven_platform.backend.src.policy_models import PolicyAssertion, PolicySource, PolicySourceVersion
+from products.compliance.backend.src.services.policy_rule_normalizer import normalize_rule_candidate
+from products.compliance.backend.src.services.policy_assertions.validation_service import validate_assertion
 
 DEFAULT_STALE_AFTER_DAYS = 90
 

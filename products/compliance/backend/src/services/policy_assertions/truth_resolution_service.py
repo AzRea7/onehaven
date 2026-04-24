@@ -7,11 +7,11 @@ from typing import Any, Iterable, Mapping, Sequence
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.policy.authority import authority_rank, best_authority, is_support_only_authority
-from app.domain.policy.conflicts import assess_conflict, is_blocking_conflict
-from app.domain.policy.evidence import determine_evidence_role
-from app.domain.policy.materiality import get_rule_family_materiality
-from app.policy_models import PolicyAssertion, PolicySource
+from onehaven_platform.backend.src.domain.policy.authority import authority_rank, best_authority, is_support_only_authority
+from onehaven_platform.backend.src.domain.policy.conflicts import assess_conflict, is_blocking_conflict
+from onehaven_platform.backend.src.domain.policy.evidence import determine_evidence_role
+from onehaven_platform.backend.src.domain.policy.materiality import get_rule_family_materiality
+from onehaven_platform.backend.src.policy_models import PolicyAssertion, PolicySource
 
 
 NON_TRUTH_VALIDATION_STATES = {"weak_support", "ambiguous", "unsupported", "conflicting"}

@@ -1,0 +1,1376 @@
+{
+  "phase": 66,
+  "dry_run": false,
+  "rule_count": 84,
+  "rewrite_file_count": 78,
+  "rewrites": [
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AuroraBackground.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/AuroraBackground",
+          "pattern": "src/components/AuroraBackground",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Golem",
+          "pattern": "src/components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Spinner",
+          "pattern": "src/components/Spinner",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Spinner",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/IngestionSourcesPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Spinner",
+          "pattern": "src/components/Spinner",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Spinner",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/RehabFromPhotosCTA.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/AuroraBackground",
+          "pattern": "src/components/AuroraBackground",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Shell",
+          "pattern": "src/components/Shell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Shell",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/VirtualList.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/VirtualList",
+          "pattern": "src/components/VirtualList",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/VirtualList",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "replacements": [
+        {
+          "rule": "../components/EmptyState",
+          "pattern": "\\.\\./components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Golem",
+          "pattern": "\\.\\./components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        },
+        {
+          "rule": "../components/KpiCard",
+          "pattern": "\\.\\./components/KpiCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/KpiCard",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+      "replacements": [
+        {
+          "rule": "../components/EmptyState",
+          "pattern": "\\.\\./components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Golem",
+          "pattern": "\\.\\./components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "replacements": [
+        {
+          "rule": "../components/IngestionErrorsDrawer",
+          "pattern": "\\.\\./components/IngestionErrorsDrawer",
+          "replacement": "products/acquire/frontend/src/components/IngestionErrorsDrawer",
+          "count": "1"
+        },
+        {
+          "rule": "../components/IngestionRunsPanel",
+          "pattern": "\\.\\./components/IngestionRunsPanel",
+          "replacement": "products/acquire/frontend/src/components/IngestionRunsPanel",
+          "count": "1"
+        },
+        {
+          "rule": "../components/IngestionSourcesPanel",
+          "pattern": "\\.\\./components/IngestionSourcesPanel",
+          "replacement": "products/acquire/frontend/src/components/IngestionSourcesPanel",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/StatCard",
+          "pattern": "\\.\\./components/StatCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/StatCard",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+      "replacements": [
+        {
+          "rule": "../components/GlassCard",
+          "pattern": "\\.\\./components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+      "replacements": [
+        {
+          "rule": "../components/EmptyState",
+          "pattern": "\\.\\./components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Golem",
+          "pattern": "\\.\\./components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        },
+        {
+          "rule": "../components/KpiCard",
+          "pattern": "\\.\\./components/KpiCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/KpiCard",
+          "count": "1"
+        },
+        {
+          "rule": "../components/MarketSourcePackModal",
+          "pattern": "\\.\\./components/MarketSourcePackModal",
+          "replacement": "products/compliance/frontend/src/components/MarketSourcePackModal",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+      "replacements": [
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "replacements": [
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "replacements": [
+        {
+          "rule": "../components/EmptyState",
+          "pattern": "\\.\\./components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Golem",
+          "pattern": "\\.\\./components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PaneSwitcher",
+          "pattern": "\\.\\./components/PaneSwitcher",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PaneSwitcher",
+          "count": "1"
+        },
+        {
+          "rule": "../components/StatPill",
+          "pattern": "\\.\\./components/StatPill",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/StatPill",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Register.tsx",
+      "replacements": [
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "packages/ui/src/components/AuroraBackground.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/AuroraBackground",
+          "pattern": "src/components/AuroraBackground",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "packages/ui/src/components/Golem.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Golem",
+          "pattern": "src/components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "packages/ui/src/components/VirtualList.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/VirtualList",
+          "pattern": "src/components/VirtualList",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/VirtualList",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/auth/Login.tsx",
+      "replacements": [
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/auth/Register.tsx",
+      "replacements": [
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/AgentRunCompare.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/AgentRunHistory.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/AgentRunsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/AgentSlots.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/AuroraBackground",
+          "pattern": "src/components/AuroraBackground",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/GlobalFilters.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/Golem.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Golem",
+          "pattern": "src/components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/Shell.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/AuroraBackground",
+          "pattern": "src/components/AuroraBackground",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Shell",
+          "pattern": "src/components/Shell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Shell",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/VirtualList.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/VirtualList",
+          "pattern": "src/components/VirtualList",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/VirtualList",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/shell/Shell.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/AuroraBackground",
+          "pattern": "src/components/AuroraBackground",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Shell",
+          "pattern": "src/components/Shell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Shell",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/components/AcquisitionDeadlinePanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/components/DocumentFieldReviewPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/components/IngestionLaunchCard.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/components/IngestionRunsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Spinner",
+          "pattern": "src/components/Spinner",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Spinner",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/components/IngestionSourcesPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Spinner",
+          "pattern": "src/components/Spinner",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Spinner",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionPane.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionQueue.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Golem",
+          "pattern": "src/components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/DealIntake.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/ComplianceDocumentStack.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/ComplianceDocumentUploader.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/CompliancePhotoFindingsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/RehabFromPhotosCTA.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/InspectionReadiness.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/InspectionTimelineCard.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/IngestionSourcesPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/GlassCard",
+          "pattern": "src/components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Spinner",
+          "pattern": "src/components/Spinner",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Spinner",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/ComplianceDocumentStack.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/ComplianceDocumentUploader.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/CompliancePhotoFindingsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/ComplianceReminderPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/InspectionReadiness.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/InspectionTimelineCard.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/JurisdictionProfiles.tsx",
+      "replacements": [
+        {
+          "rule": "../components/GlassCard",
+          "pattern": "\\.\\./components/GlassCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/GlassCard",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/Jurisdictions.tsx",
+      "replacements": [
+        {
+          "rule": "../components/EmptyState",
+          "pattern": "\\.\\./components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Golem",
+          "pattern": "\\.\\./components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        },
+        {
+          "rule": "../components/KpiCard",
+          "pattern": "\\.\\./components/KpiCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/KpiCard",
+          "count": "1"
+        },
+        {
+          "rule": "../components/MarketSourcePackModal",
+          "pattern": "\\.\\./components/MarketSourcePackModal",
+          "replacement": "products/compliance/frontend/src/components/MarketSourcePackModal",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        },
+        {
+          "rule": "../components/Surface",
+          "pattern": "\\.\\./components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/PolicyReview.tsx",
+      "replacements": [
+        {
+          "rule": "../components/PageHero",
+          "pattern": "\\.\\./components/PageHero",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageHero",
+          "count": "1"
+        },
+        {
+          "rule": "../components/PageShell",
+          "pattern": "\\.\\./components/PageShell",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/PageShell",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/PropertyCompliancePanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/frontend/src/pages/InvestorPane.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/IngestionLaunchCard",
+          "pattern": "src/components/IngestionLaunchCard",
+          "replacement": "products/acquire/frontend/src/components/IngestionLaunchCard",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/IngestionRunsPanel",
+          "pattern": "src/components/IngestionRunsPanel",
+          "replacement": "products/acquire/frontend/src/components/IngestionRunsPanel",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/MarketSourcePackModal",
+          "pattern": "src/components/MarketSourcePackModal",
+          "replacement": "products/compliance/frontend/src/components/MarketSourcePackModal",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/StatPill",
+          "pattern": "src/components/StatPill",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/StatPill",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/NextActionsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/PhotoGallery.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/PhotoUploader.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/RehabFromPhotosCTA.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/StageProgress.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/pages/Dashboard.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/Golem",
+          "pattern": "src/components/Golem",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Golem",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/KpiCard",
+          "pattern": "src/components/KpiCard",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/KpiCard",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/pages/ManagementPane.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/tenants/frontend/src/components/TenantPipeline.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/tenants/frontend/src/pages/TenantsPane.tsx",
+      "replacements": [
+        {
+          "rule": "src/components/EmptyState",
+          "pattern": "src/components/EmptyState",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/EmptyState",
+          "count": "1"
+        },
+        {
+          "rule": "src/components/Surface",
+          "pattern": "src/components/Surface",
+          "replacement": "onehaven_onehaven_platform/frontend/src/components/Surface",
+          "count": "1"
+        }
+      ]
+    }
+  ]
+}

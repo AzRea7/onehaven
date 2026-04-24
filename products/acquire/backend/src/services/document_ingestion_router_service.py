@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import Document
+from onehaven_platform.backend.src.models import Document
 
 
 DOCUMENT_KIND_BY_PRODUCT: dict[str, str] = {

@@ -1,0 +1,19 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import App from "apps/suite-web/src/app/App";
+import "./styles.css";
+import "./styles/tokens.css";
+import "./styles/motion.css";
+import "./styles/globals.css";
+import { AuthProvider } from "./lib/auth";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </BrowserRouter>
+  </React.StrictMode>,
+);

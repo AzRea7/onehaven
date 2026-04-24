@@ -1,0 +1,26 @@
+{
+  "phase": 61,
+  "dry_run": false,
+  "summary": {
+    "would_remove": 0,
+    "removed": 2,
+    "skipped": 1
+  },
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+      "status": "removed",
+      "reason": "moved_in_phase60"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "status": "removed",
+      "reason": "moved_in_phase60"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/meta.py",
+      "status": "skipped",
+      "reason": "skipped"
+    }
+  ]
+}

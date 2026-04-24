@@ -15,11 +15,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import asc, desc, func, select, text
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import get_principal
-from app.config import settings
-from app.db import get_db
-from app.domain.jurisdiction_scoring import compute_friction
-from app.models import (
+from onehaven_platform.backend.src.auth import get_principal
+from onehaven_platform.backend.src.config import settings
+from onehaven_platform.backend.src.db import get_db
+from onehaven_platform.backend.src.services.jurisdiction_scoring_service import compute_friction
+from onehaven_platform.backend.src.models import (
     AppUser,
     Deal,
     JurisdictionRule,
@@ -33,7 +33,7 @@ from app.models import (
     UnderwritingResult,
     Valuation,
 )
-from app.schemas import (
+from onehaven_platform.backend.src.schemas import (
     CeilingCandidate,
     ChecklistItemOut,
     ChecklistOut,
@@ -53,26 +53,26 @@ from app.schemas import (
     PropertyTaxEnrichmentOut,
     FinancialEnrichmentBatchOut,
 )
-from app.services.geo_enrichment import enrich_property_geo
-from app.services.property_tax_enrichment_service import enrich_property_tax
-from app.services.property_insurance_enrichment_service import enrich_property_insurance
-from app.products.management.services.properties.state_machine import (
+from onehaven_platform.backend.src.services.geo_enrichment import enrich_property_geo
+from products.intelligence.backend.src.services.property_tax_enrichment_service import enrich_property_tax
+from products.intelligence.backend.src.services.property_insurance_enrichment_service import enrich_property_insurance
+from onehaven_platform.backend.src.services.state_machine_service import (
     compute_and_persist_stage,
     get_state_payload,
     normalize_decision_bucket,
 )
-from app.products.compliance.services.workflow_gate_service import build_workflow_summary, build_property_jurisdiction_blocker
-from app.products.compliance.services.compliance_document_service import build_property_document_stack
-from app.products.compliance.services.compliance_engine.projection_service import build_property_compliance_brief, build_property_projection_snapshot
+from onehaven_platform.backend.src.services.compliance_projection_service import build_workflow_summary, build_property_jurisdiction_blocker
+from onehaven_platform.backend.src.services.compliance_projection_service import build_property_document_stack
+from onehaven_platform.backend.src.services.compliance_projection_service import build_property_compliance_brief, build_property_projection_snapshot
 from products.acquire.backend.src.services.acquisition_tag_service import list_property_tags, replace_property_tags
 from products.acquire.backend.src.services.acquisition_participant_service import list_participants
-from app.products.management.services.properties.inventory_snapshot_service import (
+from products.ops.backend.src.services.properties.inventory_snapshot_service import (
     build_property_inventory_snapshot,
     build_inventory_snapshots_for_scope,
 )
-from app.services.property_price_resolution_service import resolve_prices_from_sources
+from products.intelligence.backend.src.services.property_price_resolution_service import resolve_prices_from_sources
 
-from app.domain.rent_learning import recompute_rent_fields
+from products.intelligence.backend.src.domain.rent_learning import recompute_rent_fields
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 log = logging.getLogger("onehaven.properties")

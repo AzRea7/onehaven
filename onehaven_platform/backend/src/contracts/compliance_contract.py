@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+
+class ComplianceContract(Protocol):
+    def build_property_jurisdiction_blocker(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...
+    def build_workflow_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...
+    def build_property_projection_snapshot(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...

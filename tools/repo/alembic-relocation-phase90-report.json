@@ -1,0 +1,39 @@
+{
+  "phase": 90,
+  "dry_run": false,
+  "remove_source": true,
+  "moves": [
+    {
+      "source": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\backend\\app\\alembic",
+      "target": "C:\\Users\\austin\\onehaven\\apps\\suite_api\\db\\alembic",
+      "status": "moved",
+      "reason": "ok"
+    },
+    {
+      "source": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\backend\\app\\alembic.ini",
+      "target": "C:\\Users\\austin\\onehaven\\apps\\suite_api\\db\\alembic.ini",
+      "status": "moved",
+      "reason": "ok"
+    }
+  ],
+  "patches": [
+    {
+      "file": "apps/suite_api/db/alembic/env.py",
+      "status": "updated",
+      "replacements": 1
+    },
+    {
+      "file": "apps/suite_api/db/alembic.ini",
+      "status": "unchanged",
+      "replacements": 0
+    }
+  ],
+  "legacy_app": {
+    "path": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\backend\\app",
+    "status": "skipped",
+    "reason": "not_empty",
+    "remaining_files": [
+      "onehaven_decision_engine/backend/app/__init__.py"
+    ]
+  }
+}

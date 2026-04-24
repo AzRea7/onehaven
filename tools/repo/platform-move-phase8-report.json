@@ -1,0 +1,384 @@
+{
+  "phase": 8,
+  "description": "Move high-confidence platform candidates",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 62,
+  "would_move_count": 0,
+  "moved_count": 59,
+  "skipped_count": 3,
+  "results": [
+    {
+      "source": "backend/app/clients/federal_register.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/federal_register.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/clients/govinfo.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/govinfo.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/clients/hud_counselor.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/hud_counselor.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/clients/hud_user.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/hud_user.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/clients/rentcast.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/rentcast.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/photo_rehab_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/files/photo_rehab_agent.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/audit.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/audit.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/importers/zillow.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/zillow.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/workflow/panes.py",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/panes.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/workflow/stages.py",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/stages.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/integrations/lm_studio_client.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/lm_studio_client.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/middleware/request_id.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/request_id.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/middleware/structured_logging.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/structured_logging.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/routers/api_keys.py",
+      "target": "onehaven_onehaven_platform/backend/src/identity/api_keys.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/routers/audit.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/audit.py",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "backend/app/routers/auth.py",
+      "target": "onehaven_onehaven_platform/backend/src/identity/interfaces/auth_router.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/routers/health.py",
+      "target": "apps/suite-api/app/api/health/health.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/routers/metrics.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/metrics.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/routers/photos.py",
+      "target": "onehaven_onehaven_platform/backend/src/files/photos.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/routers/workflow.py",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/workflow.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/agent_trace.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/agent_trace.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/auth_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/identity/auth_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/crime_index.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/crime_index.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/geocode_cache_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/geocode_cache_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/geocoding_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/geocoding_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/hud_fmr_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/hud_fmr_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/ingestion_scheduler_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/locks_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/orgs/locks_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/market_catalog_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/search/market_catalog_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/offender_index.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/offender_index.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/onboarding_flows.py",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/onboarding_flows.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/ownership.py",
+      "target": "onehaven_onehaven_platform/backend/src/identity/ownership.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/pane_routing_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/pane_routing_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/photo_rehab_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/files/photo_rehab_agent.py",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "backend/app/services/plan_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/orgs/plan_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/property_photo_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/files/property_photo_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/property_tax_enrichment_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/property_tax_enrichment_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/public_tax_lookup_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/public_tax_lookup_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/rent_refresh_queue_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/rent_refresh_queue_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/rentcast_listing_source.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/rentcast_listing_source.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/rentcast_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/rentcast_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/runtime_metrics.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/runtime_metrics.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/__init__.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/__init__.py",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/bsa_adapter.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/bsa_adapter.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/county_rate_adapter.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/county_rate_adapter.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/public_record_adapter.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/public_record_adapter.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/base.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/base.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/cache.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/cache.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/fallbacks.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/fallbacks.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/registry.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/registry.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/tax/service.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/usage_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/orgs/usage_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/virus_scanning_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/files/virus_scanning_service.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/zillow_api_source.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/zillow_api_source.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/zillow_photo_source.py",
+      "target": "onehaven_onehaven_platform/backend/src/files/zillow_photo_source.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/tasks/ingestion_tasks.py",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/tasks/market_sync_tasks.py",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/market_sync_tasks.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/workers/agent_tasks.py",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/agent_tasks.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/workers/agent_worker.py",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/agent_worker.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/workers/celery_app.py",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/celery_app.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/workers/risk_tasks.py",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/risk_tasks.py",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ]
+}

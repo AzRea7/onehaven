@@ -9,7 +9,7 @@
     {
       "file": "tools/repo/validate_product_migration.py",
       "type": "legacy_backend_import",
-      "match": "app.products.tenant",
+      "match": "products.tenants.backend.src",
       "line": 24
     }
   ],

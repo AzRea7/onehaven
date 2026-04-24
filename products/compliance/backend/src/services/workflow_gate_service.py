@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.workflow.stages import (
+from onehaven_platform.backend.src.domain.workflow.stages import (
     STAGES,
     clamp_stage,
     next_stage,
@@ -11,9 +11,9 @@ from app.domain.workflow.stages import (
     stage_meta,
     stage_rank,
 )
-from app.services.pane_routing_service import build_pane_context
-from app.products.compliance.services.compliance_engine.projection_service import build_property_projection_snapshot
-from app.products.management.services.properties.state_machine import get_state_payload, get_transition_payload
+from onehaven_platform.backend.src.services.pane_routing_service import build_pane_context
+from onehaven_platform.backend.src.services.compliance_projection_service import build_property_projection_snapshot
+from onehaven_platform.backend.src.services.state_machine_service import get_state_payload, get_transition_payload
 
 
 def _rollback_quietly(db) -> None:

@@ -1,0 +1,93 @@
+{
+  "phase": 46,
+  "summary": {
+    "total": 8,
+    "identical": 0,
+    "different": 0,
+    "missing_target": 0,
+    "already_migrated": 5,
+    "missing_both": 3
+  },
+  "audits": [
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/metrics.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/metrics_router.py",
+      "source_exists": false,
+      "target_exists": false,
+      "source_hash": null,
+      "target_hash": null,
+      "status": "missing_both",
+      "reason": "neither_source_nor_target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "target": "products/ops/backend/src/routers/ops.py",
+      "source_exists": false,
+      "target_exists": true,
+      "source_hash": null,
+      "target_hash": "634ad79705a411b13a2e60ff5471eaf5b1a5c4b42db81b9c770901de45f0dd95",
+      "status": "already_migrated",
+      "reason": "target_exists_but_legacy_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/photos.py",
+      "target": "products/compliance/backend/src/routers/photos.py",
+      "source_exists": false,
+      "target_exists": true,
+      "source_hash": null,
+      "target_hash": "3ed0c7cdc7edcb9fd7cbd0351ec60e4651bfc80e6af8f62dd87b77c191b7734e",
+      "status": "already_migrated",
+      "reason": "target_exists_but_legacy_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/policy_seed.py",
+      "target": "products/compliance/backend/src/routers/policy_seed.py",
+      "source_exists": false,
+      "target_exists": true,
+      "source_hash": null,
+      "target_hash": "53b48736f93f8e293636b7958ef5b3a4f9d114646495c74ca5470dbcdeafb63e",
+      "status": "already_migrated",
+      "reason": "target_exists_but_legacy_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent_enrich.py",
+      "target": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "source_exists": false,
+      "target_exists": true,
+      "source_hash": null,
+      "target_hash": "02fc3304ee99172cf7e2bbcef6615ea3ecb3deba4fd364da82d28707e302110e",
+      "status": "already_migrated",
+      "reason": "target_exists_but_legacy_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/streetview.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/streetview_router.py",
+      "source_exists": false,
+      "target_exists": false,
+      "source_hash": null,
+      "target_hash": null,
+      "status": "missing_both",
+      "reason": "neither_source_nor_target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/trust.py",
+      "target": "products/compliance/backend/src/routers/trust.py",
+      "source_exists": false,
+      "target_exists": true,
+      "source_hash": null,
+      "target_hash": "a606ff5d564a0887762cd836567d01f862f38472c92ef5a4eed246b11c67aab3",
+      "status": "already_migrated",
+      "reason": "target_exists_but_legacy_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/workflow.py",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/workflow_router.py",
+      "source_exists": false,
+      "target_exists": false,
+      "source_hash": null,
+      "target_hash": null,
+      "status": "missing_both",
+      "reason": "neither_source_nor_target_exists"
+    }
+  ]
+}

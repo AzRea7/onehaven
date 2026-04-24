@@ -10,21 +10,21 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal, require_owner
-from app.db import get_db
-from app.domain.audit import emit_audit
-from app.domain.policy.defaults import michigan_global_defaults
-from app.models import JurisdictionRule, Property
-from app.policy_models import JurisdictionProfile, PolicySource
-from app.products.compliance.services.policy_coverage.completeness_service import (
+from onehaven_platform.backend.src.auth import get_principal, require_owner
+from onehaven_platform.backend.src.db import get_db
+from onehaven_platform.backend.src.domain.audit import emit_audit
+from onehaven_platform.backend.src.domain.policy.defaults import michigan_global_defaults
+from onehaven_platform.backend.src.models import JurisdictionRule, Property
+from onehaven_platform.backend.src.policy_models import JurisdictionProfile, PolicySource
+from products.compliance.backend.src.services.policy_coverage.completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
-from app.products.compliance.services.policy_governance.notification_service import notify_if_jurisdiction_stale, build_review_queue_entries, persist_review_queue_decision
-from app.products.compliance.services.policy_coverage.health_service import get_jurisdiction_health, get_manual_stale_review_dashboard
-from app.products.compliance.services.policy_assertions.review_service import create_policy_override, list_policy_overrides, revoke_policy_override
-from app.products.compliance.services.policy_governance.refresh_service import refresh_jurisdiction_profile
-from app.tasks.jurisdiction_tasks import (
+from products.compliance.backend.src.services.policy_governance.notification_service import notify_if_jurisdiction_stale, build_review_queue_entries, persist_review_queue_decision
+from products.compliance.backend.src.services.policy_coverage.health_service import get_jurisdiction_health, get_manual_stale_review_dashboard
+from products.compliance.backend.src.services.policy_assertions.review_service import create_policy_override, list_policy_overrides, revoke_policy_override
+from products.compliance.backend.src.services.policy_governance.refresh_service import refresh_jurisdiction_profile
+from onehaven_platform.backend.src.jobs.jurisdiction_tasks import (
     manual_health_snapshot,
     manual_notify_stale_profiles,
     manual_recompute_due_profiles,
@@ -1375,7 +1375,7 @@ def jurisdiction_evidence_market(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_evidence_service import evidence_for_market
+    from products.compliance.backend.src.services.policy_evidence_service import evidence_for_market
     return evidence_for_market(
         db,
         org_id=getattr(principal, "org_id", None),
@@ -1396,7 +1396,7 @@ def jurisdiction_dataset_market(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.products.compliance.services.policy_sources.dataset_service import dataset_snapshot_for_market
+    from products.compliance.backend.src.services.policy_sources.dataset_service import dataset_snapshot_for_market
     return dataset_snapshot_for_market(
         db,
         org_id=getattr(principal, "org_id", None),

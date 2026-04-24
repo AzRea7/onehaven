@@ -1,0 +1,70 @@
+{
+  "phase": 87,
+  "dry_run": false,
+  "remove_source": true,
+  "summary": {
+    "contracts": 4,
+    "moves": 4,
+    "rewrites": 0,
+    "platform_patches": 0,
+    "skipped": 0
+  },
+  "actions": [
+    {
+      "kind": "contract",
+      "source": "onehaven_platform/backend/src/contracts/state_machine_contract.py",
+      "target": "onehaven_platform/backend/src/contracts/state_machine_contract.py",
+      "status": "written",
+      "reason": "created_or_replaced"
+    },
+    {
+      "kind": "contract",
+      "source": "onehaven_platform/backend/src/contracts/compliance_contract.py",
+      "target": "onehaven_platform/backend/src/contracts/compliance_contract.py",
+      "status": "written",
+      "reason": "created_or_replaced"
+    },
+    {
+      "kind": "contract",
+      "source": "onehaven_platform/backend/src/contracts/photo_contract.py",
+      "target": "onehaven_platform/backend/src/contracts/photo_contract.py",
+      "status": "written",
+      "reason": "created_or_replaced"
+    },
+    {
+      "kind": "contract",
+      "source": "onehaven_platform/backend/src/contracts/workflow_contract.py",
+      "target": "onehaven_platform/backend/src/contracts/workflow_contract.py",
+      "status": "written",
+      "reason": "created_or_replaced"
+    },
+    {
+      "kind": "move",
+      "source": "products/ops/backend/src/services/properties/state_machine.py",
+      "target": "onehaven_platform/backend/src/services/state_machine_service.py",
+      "status": "moved",
+      "reason": "copied_and_removed_source"
+    },
+    {
+      "kind": "move",
+      "source": "products/ops/backend/src/services/stage_guard.py",
+      "target": "onehaven_platform/backend/src/services/stage_guard_service.py",
+      "status": "moved",
+      "reason": "copied_and_removed_source"
+    },
+    {
+      "kind": "move",
+      "source": "products/ops/backend/src/services/property_photo_service.py",
+      "target": "onehaven_platform/backend/src/services/photo_service.py",
+      "status": "moved",
+      "reason": "copied_and_removed_source"
+    },
+    {
+      "kind": "move",
+      "source": "products/compliance/backend/src/services/compliance_engine/projection_service.py",
+      "target": "onehaven_platform/backend/src/services/compliance_projection_service.py",
+      "status": "moved",
+      "reason": "copied_and_removed_source"
+    }
+  ]
+}

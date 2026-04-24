@@ -4,9 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from app.products.compliance.services.policy_sources.source_service import _is_rejected_discovered_source
-from app.policy_models import PolicyAssertion, PolicySource
-from app.products.compliance.services.policy_sources.catalog_admin_service import merged_catalog_for_market
+from products.compliance.backend.src.services.policy_sources.source_service import _is_rejected_discovered_source
+from onehaven_platform.backend.src.policy_models import PolicyAssertion, PolicySource
+from products.compliance.backend.src.services.policy_sources.catalog_admin_service import merged_catalog_for_market
 
 
 ARCHIVE_MARKER = "[archived_stale_source]"

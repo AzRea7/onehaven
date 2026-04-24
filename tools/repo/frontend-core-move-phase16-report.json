@@ -1,0 +1,215 @@
+{
+  "phase": 16,
+  "description": "Move high-confidence frontend app/platform/package files",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 29,
+  "would_move_count": 0,
+  "moved_count": 29,
+  "skipped_count": 0,
+  "results": [
+    {
+      "source": "frontend/src/App.tsx",
+      "target": "apps/suite-web/src/app/App.tsx",
+      "bucket": "app",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/AnimatedBackdrop.tsx",
+      "target": "packages/ui/src/components/AnimatedBackdrop.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/AppFooter.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/AppFooter.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/AppHeader.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/AppHeader.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/AppSelect.tsx",
+      "target": "packages/ui/src/components/AppSelect.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/AppShell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/AppShell.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/Artwork.tsx",
+      "target": "packages/ui/src/components/Artwork.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/AuroraBackground.tsx",
+      "target": "packages/ui/src/components/AuroraBackground.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/EmptyState.tsx",
+      "target": "packages/ui/src/components/EmptyState.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/FilterBar.tsx",
+      "target": "packages/ui/src/components/FilterBar.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/GlassCard.tsx",
+      "target": "packages/ui/src/components/GlassCard.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/Golem.tsx",
+      "target": "packages/ui/src/components/Golem.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/IngestionErrorsDrawer.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/KpiCard.tsx",
+      "target": "packages/ui/src/components/KpiCard.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/PageHero.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/PageHero.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/PageShell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/PageShell.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/PaneSwitcher.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/Shell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/shell/Shell.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/Spinner.tsx",
+      "target": "packages/ui/src/components/Spinner.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/StatCard.tsx",
+      "target": "packages/ui/src/components/StatCard.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/StatPill.tsx",
+      "target": "packages/ui/src/components/StatPill.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/Surface.tsx",
+      "target": "packages/ui/src/components/Surface.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/components/VirtualList.tsx",
+      "target": "packages/ui/src/components/VirtualList.tsx",
+      "bucket": "package",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/lib/auth.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/auth/auth.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/lib/authFlow.ts",
+      "target": "onehaven_onehaven_platform/frontend/src/auth/authFlow.ts",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/main.tsx",
+      "target": "apps/suite-web/src/bootstrap/main.tsx",
+      "bucket": "app",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/pages/Login.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/auth/Login.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/pages/Register.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/auth/Register.tsx",
+      "bucket": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/styles.css",
+      "target": "apps/suite-web/src/app/styles.css",
+      "bucket": "app",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ]
+}

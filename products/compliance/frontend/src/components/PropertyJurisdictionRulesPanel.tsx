@@ -9,9 +9,9 @@ import {
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
-import Surface from "@/components/Surface";
-import EmptyState from "@/components/EmptyState";
-import JurisdictionCoverageBadge from "@/products/compliance/components/JurisdictionCoverageBadge";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
+import EmptyState from "packages/ui/onehaven_onehaven_platform/frontend/src/components/EmptyState";
+import JurisdictionCoverageBadge from "products/compliance/frontend/src/components/JurisdictionCoverageBadge";
 
 type RuleLayer = {
   layer?: string | null;

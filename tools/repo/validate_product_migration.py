@@ -13,7 +13,7 @@ PRODUCTS = {
         "legacy_frontend": "onehaven_decision_engine/frontend/src/products/investor_intelligence",
         "new_backend": "products/intelligence/backend/src",
         "new_frontend": "products/intelligence/frontend/src",
-        "legacy_backend_mod": "app.products.investor_intelligence",
+        "legacy_backend_mod": "products.intelligence.backend.src",
         "legacy_frontend_path": "src/products/investor_intelligence",
     },
     "tenants": {
@@ -21,7 +21,7 @@ PRODUCTS = {
         "legacy_frontend": "onehaven_decision_engine/frontend/src/products/tenant",
         "new_backend": "products/tenants/backend/src",
         "new_frontend": "products/tenants/frontend/src",
-        "legacy_backend_mod": "app.products.tenant",
+        "legacy_backend_mod": "products.tenants.backend.src",
         "legacy_frontend_path": "src/products/tenant",
     },
     "ops": {
@@ -29,7 +29,7 @@ PRODUCTS = {
         "legacy_frontend": "onehaven_decision_engine/frontend/src/products/management",
         "new_backend": "products/ops/backend/src",
         "new_frontend": "products/ops/frontend/src",
-        "legacy_backend_mod": "app.products.management",
+        "legacy_backend_mod": "products.ops.backend.src",
         "legacy_frontend_path": "src/products/management",
     },
     "compliance": {

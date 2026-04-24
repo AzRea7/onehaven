@@ -8,12 +8,12 @@ from typing import Any, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
-from app.products.compliance.services.policy_coverage.completeness_service import (
+from onehaven_platform.backend.src.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
+from products.compliance.backend.src.services.policy_coverage.completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
-from app.products.compliance.services.policy_governance.notification_service import (
+from products.compliance.backend.src.services.policy_governance.notification_service import (
     build_jurisdiction_profile_stale_notification,
     build_review_queue_payload,
     build_rule_change_notification,
@@ -22,9 +22,9 @@ from app.products.compliance.services.policy_governance.notification_service imp
     notify_if_jurisdiction_stale,
     record_notification_event,
 )
-from app.products.compliance.services.policy_assertions.extractor_service import extract_assertions_for_source, mark_assertions_stale_for_source
-from app.products.compliance.services.policy_assertions.review_service import apply_governance_lifecycle, diff_active_rules_for_source
-from app.products.compliance.services.policy_sources.source_service import (
+from products.compliance.backend.src.services.policy_assertions.extractor_service import extract_assertions_for_source, mark_assertions_stale_for_source
+from products.compliance.backend.src.services.policy_assertions.review_service import apply_governance_lifecycle, diff_active_rules_for_source
+from products.compliance.backend.src.services.policy_sources.source_service import (
     collect_catalog_for_market,
     discover_policy_sources_for_market,
     inventory_summary_for_market,
@@ -32,7 +32,7 @@ from app.products.compliance.services.policy_sources.source_service import (
     policy_source_needs_refresh,
     refresh_policy_source_and_detect_changes,
 )
-from app.services.policy_change_detection_service import (
+from products.compliance.backend.src.services.policy_change_detection_service import (
     compute_next_retry_due,
     determine_profile_refresh_state as _policy_change_determine_profile_refresh_state,
  )
@@ -1235,11 +1235,11 @@ def mark_profile_stale_if_needed(
         "jurisdiction_profile_id": int(profile.id),
     }
 
-from app.config import settings as _chunk8_settings
-from app.products.compliance.services.policy_coverage.health_service import get_jurisdiction_health as _chunk8_get_jurisdiction_health
-from app.products.compliance.services.policy_coverage.lockout_service import profile_lockout_payload as _chunk8_profile_lockout_payload
-from app.products.compliance.services.policy_governance.notification_service import notify_if_profile_locked as _chunk8_notify_if_profile_locked
-from app.products.compliance.services.policy_coverage.sla_service import source_due_at as _chunk8_source_due_at, source_is_past_sla as _chunk8_source_is_past_sla
+from onehaven_platform.backend.src.config import settings as _chunk8_settings
+from products.compliance.backend.src.services.policy_coverage.health_service import get_jurisdiction_health as _chunk8_get_jurisdiction_health
+from products.compliance.backend.src.services.policy_coverage.lockout_service import profile_lockout_payload as _chunk8_profile_lockout_payload
+from products.compliance.backend.src.services.policy_governance.notification_service import notify_if_profile_locked as _chunk8_notify_if_profile_locked
+from products.compliance.backend.src.services.policy_coverage.sla_service import source_due_at as _chunk8_source_due_at, source_is_past_sla as _chunk8_source_is_past_sla
 
 _chunk8_original_refresh_jurisdiction_profile = refresh_jurisdiction_profile
 _chunk8_original_refresh_due_jurisdictions = refresh_due_jurisdictions
@@ -1362,9 +1362,9 @@ def refresh_due_jurisdictions(
 
 
 
-from app.products.compliance.services.policy_coverage.health_service import get_jurisdiction_health as _chunk3_get_jurisdiction_health
-from app.products.compliance.services.policy_coverage.lockout_service import profile_lockout_payload as _chunk3_profile_lockout_payload
-from app.products.compliance.services.policy_coverage.sla_service import (
+from products.compliance.backend.src.services.policy_coverage.health_service import get_jurisdiction_health as _chunk3_get_jurisdiction_health
+from products.compliance.backend.src.services.policy_coverage.lockout_service import profile_lockout_payload as _chunk3_profile_lockout_payload
+from products.compliance.backend.src.services.policy_coverage.sla_service import (
     build_refresh_requirements as _chunk3_build_refresh_requirements,
     collect_profile_source_sla_summary as _chunk3_collect_profile_source_sla_summary,
     source_due_at as _chunk3_source_due_at,

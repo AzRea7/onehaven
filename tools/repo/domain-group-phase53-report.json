@@ -1,0 +1,418 @@
+{
+  "phase": 53,
+  "dry_run": false,
+  "remove_legacy": false,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "duplicate_init_target_requires_manual_merge"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/apply.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/apply.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/contracts.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/contracts.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/executor.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/executor.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/deal_intake.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/deal_intake.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/hqs_precheck_agent.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/next_actions_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/next_actions_agent.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/ops_judge.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/ops_judge.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/packet_builder_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/packet_builder_agent.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/photo_rehab_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/photo_rehab_agent.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/public_records_check.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/public_records_check.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/rent_reasonableness_agent.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/timeline_nudger.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/timeline_nudger.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/underwrite_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/underwrite_agent.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/llm_router.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/llm_router.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/registry.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/registry.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/run_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/run_service.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/validate.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/validate.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/audit.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/audit.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/cashflow.py",
+      "target": "products/intelligence/backend/src/domain/cashflow.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "duplicate_init_target_requires_manual_merge"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/checklist_templates.py",
+      "target": "products/compliance/backend/src/domain/compliance/checklist_templates.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/compliance_completion.py",
+      "target": "products/compliance/backend/src/domain/compliance/compliance_completion.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/compliance_stats.py",
+      "target": "products/compliance/backend/src/domain/compliance/compliance_stats.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs.py",
+      "target": "products/compliance/backend/src/domain/compliance/hqs.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs_library.py",
+      "target": "products/compliance/backend/src/domain/compliance/hqs_library.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_mapping.py",
+      "target": "products/compliance/backend/src/domain/compliance/inspection_mapping.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_rules.py",
+      "target": "products/compliance/backend/src/domain/compliance/inspection_rules.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/photo_to_hqs_mapper.py",
+      "target": "products/compliance/backend/src/domain/compliance/photo_to_hqs_mapper.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/top_fail_points.py",
+      "target": "products/compliance/backend/src/domain/compliance/top_fail_points.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance.py",
+      "target": "products/compliance/backend/src/domain/compliance.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/decision_engine.py",
+      "target": "products/intelligence/backend/src/domain/decision_engine.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/events.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/events.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/fingerprint.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/fingerprint.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "duplicate_init_target_requires_manual_merge"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/base.py",
+      "target": "products/intelligence/backend/src/domain/importers/base.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/investorlift.py",
+      "target": "products/intelligence/backend/src/domain/importers/investorlift.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/zillow.py",
+      "target": "products/intelligence/backend/src/domain/importers/zillow.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/jurisdiction_scoring.py",
+      "target": "products/compliance/backend/src/domain/jurisdiction_scoring.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/operating_truth.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth_enforcement.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/operating_truth_enforcement.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "duplicate_init_target_requires_manual_merge"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/authority.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/authority.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/categories.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/categories.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/conflicts.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/conflicts.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/decisions.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/decisions.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/defaults.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/defaults.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/evidence.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/evidence.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/expected_universe.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/expected_universe.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/materiality.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/materiality.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_explain_runs.py",
+      "target": "products/intelligence/backend/src/domain/rent_explain_runs.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_learning.py",
+      "target": "products/intelligence/backend/src/domain/rent_learning.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/section8/rent_rules.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/shared/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "duplicate_init_target_requires_manual_merge"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/underwriting.py",
+      "target": "products/intelligence/backend/src/domain/underwriting.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/valuation_cadence.py",
+      "target": "products/intelligence/backend/src/domain/valuation_cadence.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/workflow/panes.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/workflow/stages.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    }
+  ],
+  "summary": {
+    "would_move": 0,
+    "moved": 18,
+    "skipped": 40
+  }
+}

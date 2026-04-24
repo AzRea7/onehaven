@@ -1,7 +1,7 @@
 import React from "react";
 import { BellRing, Clock3, Send } from "lucide-react";
 import { api } from "@/lib/api";
-import Surface from "@/components/Surface";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
 
 type ReminderRow = {
   inspection_id?: number;

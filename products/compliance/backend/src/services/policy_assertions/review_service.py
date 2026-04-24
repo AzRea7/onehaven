@@ -6,9 +6,9 @@ from typing import Any, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import normalize_category
-from app.policy_models import PolicyAssertion, PolicyOverrideLedger, PolicySource
-from app.services.policy_rule_normalizer import (
+from onehaven_platform.backend.src.domain.policy.categories import normalize_category
+from onehaven_platform.backend.src.policy_models import PolicyAssertion, PolicyOverrideLedger, PolicySource
+from products.compliance.backend.src.services.policy_rule_normalizer import (
     assertion_fingerprint,
     candidate_matches_assertion,
     candidate_to_update_dict,

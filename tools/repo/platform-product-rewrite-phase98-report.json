@@ -1,0 +1,96 @@
+{
+  "phase": 98,
+  "dry_run": false,
+  "files_changed": 22,
+  "replacements": 35,
+  "changed": [
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "replacements": 3
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "replacements": 4
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/ops_adapter.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/agents/agents_router.py",
+      "replacements": 2
+    },
+    {
+      "file": "onehaven_platform/backend/src/files/photos.py",
+      "replacements": 2
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/geocoding_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/geo_router.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "replacements": 5
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/agent_tasks.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "replacements": 3
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/market_sync_tasks.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/dashboard_rollup_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/geocoding_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/geo_enrichment.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/stage_guard_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/state_machine_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/services/trust_service.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/workflow/workflow.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/executor.py",
+      "replacements": 1
+    },
+    {
+      "file": "onehaven_platform/backend/src/domain/agents/registry.py",
+      "replacements": 1
+    }
+  ]
+}

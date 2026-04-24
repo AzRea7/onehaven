@@ -9,8 +9,8 @@ import {
   RefreshCcw,
   ShieldAlert,
 } from "lucide-react";
-import EmptyState from "@/components/EmptyState";
-import Surface from "@/components/Surface";
+import EmptyState from "packages/ui/onehaven_onehaven_platform/frontend/src/components/EmptyState";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
 
 export type FieldValueRow = {
   id?: number | string;

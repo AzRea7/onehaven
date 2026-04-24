@@ -1,0 +1,1821 @@
+{
+  "phase": 33,
+  "summary": {
+    "backend_manual_split": 7,
+    "backend_unclear": 65,
+    "frontend_manual_split": 2,
+    "frontend_unclear": 21,
+    "compliance_manual_review": 130,
+    "total_leftovers": 225
+  },
+  "backend_manual_split": [
+    {
+      "source": "backend/app/domain/compliance/photo_to_hqs_mapper.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:compliance;matched_platform:photo",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/authority.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:policy;matched_platform:auth",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/inspector_communication_service.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:inspector_communication;matched_platform:communication",
+      "matched_product": "tenants"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_task_mapper.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:jurisdiction;matched_platform:task",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/policy_catalog.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:policy;matched_platform:catalog",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/stage_guard.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:stage_guard;matched_platform:stage_guard",
+      "matched_product": "ops"
+    },
+    {
+      "source": "backend/app/tasks/jurisdiction_tasks.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:jurisdiction;matched_platform:task",
+      "matched_product": "compliance"
+    }
+  ],
+  "backend_unclear": [
+    {
+      "source": "backend/app/domain/__init__.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/apply.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/contracts.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/executor.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/packet_builder_agent.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/public_records_check.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/timeline_nudger.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/llm_router.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/registry.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/run_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/validate.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/decision_engine.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/events.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/fingerprint.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/importers/__init__.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/importers/base.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/importers/investorlift.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/operating_truth.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/operating_truth_enforcement.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/section8/rent_rules.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/shared/__init__.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/agent_runs.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/agents.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/automation.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/geo.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/imports.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/imports_alias.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/ingestion.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/meta.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/rehab.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/rent.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/rent_enrich.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/streetview.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/trust.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/address_normalization.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_actions.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_concurrency.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_engine.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_orchestrator.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_orchestrator_runtime.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_threads.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/budget_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/csv_import_mapping_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/events_facade.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/external_budget.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/fmr.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/geo_enrichment.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_dedupe_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_enrichment_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_run_execute.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_run_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_source_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/lease_rules.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/market_sync_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/portfolio_ingestion_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/portfolio_watchlist_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/product_ingestion_router_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/product_surfaces.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/property_insurance_enrichment_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/property_normalization_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/property_price_resolution_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/rent_comp_selection.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/shared/__init__.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/trust_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    }
+  ],
+  "frontend_manual_split": [
+    {
+      "source": "frontend/src/products/compliance/components/ComplianceDocumentUploader.tsx",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:compliance;matched_platform:upload",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "frontend/src/products/management/components/PhotoUploader.tsx",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:management;matched_platform:upload",
+      "matched_product": "ops"
+    }
+  ],
+  "frontend_unclear": [
+    {
+      "source": "frontend/src/components/AgentRunCompare.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AgentRunHistory.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AgentRunsPanel.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/AgentSlots.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/GlobalFilters.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/IngestionLaunchCard.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/IngestionRunsPanel.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/IngestionSourcesPanel.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/MarketSourcePackModal.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/components/RehabFromPhotosCTA.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/lib/api.ts",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/lib/filters.ts",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/lib/ingestionClient.ts",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/Agents.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/AgentsPanel.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/Constitution.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/ImportsPage.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/pages/Property.tsx",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/styles/globals.css",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/styles/motion.css",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "frontend/src/styles/tokens.css",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    }
+  ],
+  "compliance_manual_review": [
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/apply.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/contracts.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/executor.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/deal_intake.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/next_actions_agent.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/ops_judge.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/packet_builder_agent.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/public_records_check.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/timeline_nudger.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/underwrite_agent.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/registry.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/run_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/validate.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/audit.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/cashflow.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/decision_engine.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/events.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/fingerprint.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/base.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/investorlift.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/zillow.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth_enforcement.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_explain_runs.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_learning.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/section8/rent_rules.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/shared/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/underwriting.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/valuation_cadence.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/workflow/panes.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/workflow/stages.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/address_normalization.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_actions.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_concurrency.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_engine.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator_runtime.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_threads.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_trace.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/auth_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/budget_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/crime_index.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/csv_import_mapping_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/events_facade.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/external_budget.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/fmr.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocode_cache_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocoding_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/hud_fmr_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_dedupe_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_enrichment_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_execute.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_scheduler_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspector_communication_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/lease_rules.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/locks_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_sync_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/offender_index.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/onboarding_flows.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ownership.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/pane_routing_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/plan_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_ingestion_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_watchlist_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_surfaces.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_insurance_enrichment_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_normalization_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_price_resolution_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_tax_enrichment_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/public_tax_lookup_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_comp_selection.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_refresh_queue_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/runtime_metrics.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/shared/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/bsa_adapter.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/county_rate_adapter.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/public_record_adapter.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/base.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/cache.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/fallbacks.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/registry.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/trust_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/usage_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/virus_scanning_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Artwork.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AuroraBackground.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/EmptyState.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/FilterBar.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlassCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/KpiCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageHero.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageShell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PaneSwitcher.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Spinner.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatPill.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Surface.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/VirtualList.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Register.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    }
+  ]
+}

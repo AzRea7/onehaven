@@ -2,32 +2,32 @@
   "platform_candidates": [
     {
       "source": "backend/app/auth.py",
-      "target": "platform/backend/src/identity/interfaces",
+      "target": "onehaven_onehaven_platform/backend/src/identity/interfaces",
       "reason": "explicit_platform_mapping"
     },
     {
       "source": "backend/app/config.py",
-      "target": "platform/backend/src/config",
+      "target": "onehaven_onehaven_platform/backend/src/config",
       "reason": "explicit_platform_mapping"
     },
     {
       "source": "backend/app/db.py",
-      "target": "platform/backend/src/db",
+      "target": "onehaven_onehaven_platform/backend/src/db",
       "reason": "explicit_platform_mapping"
     },
     {
       "source": "backend/app/logging_config.py",
-      "target": "platform/backend/src/observability",
+      "target": "onehaven_onehaven_platform/backend/src/observability",
       "reason": "explicit_platform_mapping"
     },
     {
       "source": "backend/app/middleware",
-      "target": "platform/backend/src/observability",
+      "target": "onehaven_onehaven_platform/backend/src/observability",
       "reason": "explicit_platform_mapping"
     },
     {
       "source": "backend/app/routers/auth.py",
-      "target": "platform/backend/src/identity/interfaces",
+      "target": "onehaven_onehaven_platform/backend/src/identity/interfaces",
       "reason": "explicit_platform_mapping"
     },
     {
@@ -37,7 +37,7 @@
     },
     {
       "source": "frontend/src/lib/auth.tsx",
-      "target": "platform/frontend/src/auth",
+      "target": "onehaven_onehaven_platform/frontend/src/auth",
       "reason": "explicit_platform_mapping"
     }
   ],

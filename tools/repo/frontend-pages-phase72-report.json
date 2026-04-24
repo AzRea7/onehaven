@@ -1,0 +1,84 @@
+{
+  "phase": 72,
+  "summary": {
+    "total": 10,
+    "platform": 5,
+    "acquire": 1,
+    "compliance": 3,
+    "ops": 1,
+    "intelligence": 0,
+    "manual_review": 0
+  },
+  "plans": [
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Agents.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "platform_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/AgentsPanel.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "platform_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Constitution.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "platform_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "target": "products/acquire/frontend/src/pages/ImportsPage.tsx",
+      "owner": "acquire",
+      "confidence": "high",
+      "reason": "acquire_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+      "target": "products/compliance/frontend/src/pages/JurisdictionProfiles.tsx",
+      "owner": "compliance",
+      "confidence": "high",
+      "reason": "compliance_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+      "target": "products/compliance/frontend/src/pages/Jurisdictions.tsx",
+      "owner": "compliance",
+      "confidence": "high",
+      "reason": "compliance_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Login.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "platform_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "target": "products/compliance/frontend/src/pages/PolicyReview.tsx",
+      "owner": "compliance",
+      "confidence": "high",
+      "reason": "compliance_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "target": "products/ops/frontend/src/pages/Property.tsx",
+      "owner": "ops",
+      "confidence": "high",
+      "reason": "ops_exact_match"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Register.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Register.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "platform_exact_match"
+    }
+  ]
+}

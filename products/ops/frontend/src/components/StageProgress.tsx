@@ -11,7 +11,7 @@ import {
   Wallet,
   Home,
 } from "lucide-react";
-import Surface from "@/components/Surface";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
 
 const ORDER = [
   "deal",

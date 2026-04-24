@@ -1,0 +1,1434 @@
+{
+  "phase": 7,
+  "description": "Backend ownership planning report",
+  "legacy_root": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine",
+  "summary": {
+    "platform": 62,
+    "product": 42,
+    "manual_split": 7,
+    "unclear": 65,
+    "products": {
+      "intelligence": 7,
+      "acquire": 0,
+      "compliance": 37,
+      "tenants": 1,
+      "ops": 4
+    }
+  },
+  "records": [
+    {
+      "source": "backend/app/clients/federal_register.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/federal_register.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:federal_register",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/clients/govinfo.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/govinfo.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:govinfo",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/clients/hud_counselor.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/hud_counselor.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:hud",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/clients/hud_user.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/hud_user.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:hud",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/clients/rentcast.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/rentcast.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:rentcast",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/__init__.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/apply.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/contracts.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/executor.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/deal_intake.py",
+      "bucket": "product",
+      "target": "products/intelligence/backend/src/domain/deal_intake.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:deal",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/hqs_precheck_agent.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:hqs",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/next_actions_agent.py",
+      "bucket": "product",
+      "target": "products/ops/backend/src/domain/next_actions_agent.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:next_actions",
+      "matched_product": "ops"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/ops_judge.py",
+      "bucket": "product",
+      "target": "products/ops/backend/src/domain/ops_judge.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:ops",
+      "matched_product": "ops"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/packet_builder_agent.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/photo_rehab_agent.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/files/photo_rehab_agent.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:photo",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/public_records_check.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/timeline_nudger.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/impl/underwrite_agent.py",
+      "bucket": "product",
+      "target": "products/intelligence/backend/src/domain/underwrite_agent.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:underwrite",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "backend/app/domain/agents/llm_router.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/registry.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/run_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/agents/validate.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/audit.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/observability/audit.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:audit",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/cashflow.py",
+      "bucket": "product",
+      "target": "products/intelligence/backend/src/domain/cashflow.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:cashflow",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "backend/app/domain/compliance/__init__.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/checklist_templates.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/checklist_templates.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/compliance_completion.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/compliance_completion.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/compliance_stats.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/compliance_stats.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/hqs.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/hqs.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/hqs_library.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/hqs_library.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/inspection_mapping.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/inspection_mapping.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/inspection_rules.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/inspection_rules.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/photo_to_hqs_mapper.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:compliance;matched_platform:photo",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance/top_fail_points.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/top_fail_points.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/compliance.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/compliance.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:compliance",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/decision_engine.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/events.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/fingerprint.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/importers/__init__.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/importers/base.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/importers/investorlift.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/importers/zillow.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/zillow.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:zillow",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/jurisdiction_scoring.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/jurisdiction_scoring.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:jurisdiction",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/operating_truth.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/operating_truth_enforcement.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/policy/__init__.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/authority.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:policy;matched_platform:auth",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/categories.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/categories.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/conflicts.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/conflicts.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/decisions.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/decisions.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/defaults.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/defaults.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/evidence.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/evidence.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/expected_universe.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/expected_universe.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/policy/materiality.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/domain/materiality.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/domain/rent_explain_runs.py",
+      "bucket": "product",
+      "target": "products/intelligence/backend/src/domain/rent_explain_runs.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:rent_explain",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "backend/app/domain/rent_learning.py",
+      "bucket": "product",
+      "target": "products/intelligence/backend/src/domain/rent_learning.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:rent_learning",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "backend/app/domain/section8/rent_rules.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/shared/__init__.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/underwriting.py",
+      "bucket": "product",
+      "target": "products/intelligence/backend/src/domain/underwriting.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:underwriting",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "backend/app/domain/valuation_cadence.py",
+      "bucket": "product",
+      "target": "products/intelligence/backend/src/domain/valuation_cadence.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:valuation",
+      "matched_product": "intelligence"
+    },
+    {
+      "source": "backend/app/domain/workflow/panes.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/panes.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:workflow",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/domain/workflow/stages.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/stages.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:workflow",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/integrations/lm_studio_client.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/lm_studio_client.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:lm_studio",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/middleware/request_id.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/observability/request_id.py",
+      "confidence": "high",
+      "reason": "explicit_platform_mapping",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/middleware/structured_logging.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/observability/structured_logging.py",
+      "confidence": "high",
+      "reason": "explicit_platform_mapping",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/agent_runs.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/agents.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/api_keys.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/identity/api_keys.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:api_key",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/audit.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/observability/audit.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:audit",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/auth.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/identity/interfaces/auth_router.py",
+      "confidence": "high",
+      "reason": "explicit_platform_mapping",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/automation.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/geo.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/health.py",
+      "bucket": "platform",
+      "target": "apps/suite-api/app/api/health/health.py",
+      "confidence": "high",
+      "reason": "explicit_platform_mapping",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/imports.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/imports_alias.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/ingestion.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/meta.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/metrics.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/observability/metrics.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:metrics",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/ops.py",
+      "bucket": "product",
+      "target": "products/ops/backend/src/routers/ops.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:ops",
+      "matched_product": "ops"
+    },
+    {
+      "source": "backend/app/routers/photos.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/files/photos.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:photo",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/policy_seed.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/routers/policy_seed.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/routers/rehab.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/rent.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/rent_enrich.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/streetview.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/trust.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/routers/workflow.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/workflow.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:workflow",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/address_normalization.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_actions.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_concurrency.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_engine.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_orchestrator.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_orchestrator_runtime.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_threads.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/agent_trace.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/observability/agent_trace.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:agent_trace",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/auth_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/identity/auth_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:auth",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/budget_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/crime_index.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/crime_index.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:crime",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/csv_import_mapping_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/events_facade.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/external_budget.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/fmr.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/geo_enrichment.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/geocode_cache_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/geocode_cache_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:geocode",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/geocoding_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/geocoding_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:geocoding",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/hud_fmr_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/hud_fmr_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:hud",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_dedupe_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_enrichment_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_run_execute.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_run_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_scheduler_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:scheduler",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ingestion_source_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/inspection_scheduling_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/inspection_scheduling_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:inspection",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/inspector_communication_service.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:inspector_communication;matched_platform:communication",
+      "matched_product": "tenants"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_profile_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:jurisdiction",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_registry_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/jurisdiction_registry_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:jurisdiction",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_source_family_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/jurisdiction_source_family_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:jurisdiction",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_task_mapper.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:jurisdiction;matched_platform:task",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/lease_rules.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/locks_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/orgs/locks_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:locks",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/market_catalog_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/search/market_catalog_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:catalog",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/market_sync_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/offender_index.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/offender_index.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:offender",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/onboarding_flows.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/onboarding_flows.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:onboarding_flows",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/ownership.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/identity/ownership.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:ownership",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/pane_routing_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/pane_routing_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:pane_routing",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/photo_rehab_agent.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/files/photo_rehab_agent.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:photo",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/plan_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/orgs/plan_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:plan",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/policy_catalog.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:policy;matched_platform:catalog",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/policy_change_detection_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/policy_change_detection_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/policy_crawl_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/policy_crawl_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/policy_evidence_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/policy_evidence_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/policy_evidence_version_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/policy_evidence_version_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/policy_market_seed_service.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/policy_market_seed_service.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/policy_rule_normalizer.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/policy_rule_normalizer.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/policy_seed.py",
+      "bucket": "product",
+      "target": "products/compliance/backend/src/services/policy_seed.py",
+      "confidence": "medium",
+      "reason": "matched_product_keyword:policy",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/services/portfolio_ingestion_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/portfolio_watchlist_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/product_ingestion_router_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/product_surfaces.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/property_insurance_enrichment_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/property_normalization_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/property_photo_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/files/property_photo_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:photo",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/property_price_resolution_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/property_tax_enrichment_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/property_tax_enrichment_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/public_tax_lookup_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/public_tax_lookup_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/rent_comp_selection.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/rent_refresh_queue_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/rent_refresh_queue_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:queue",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/rentcast_listing_source.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/rentcast_listing_source.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:rentcast",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/rentcast_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/rentcast_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:rentcast",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/runtime_metrics.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/observability/runtime_metrics.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:runtime_metrics",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/shared/__init__.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/stage_guard.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:stage_guard;matched_platform:stage_guard",
+      "matched_product": "ops"
+    },
+    {
+      "source": "backend/app/services/tax/__init__.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/adapters/__init__.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/adapters/bsa_adapter.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/bsa_adapter.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/adapters/county_rate_adapter.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/county_rate_adapter.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/adapters/public_record_adapter.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/public_record_adapter.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/base.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/base.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/cache.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/cache.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/fallbacks.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/fallbacks.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/registry.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/registry.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/tax/service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:tax",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/trust_service.py",
+      "bucket": "unclear",
+      "target": null,
+      "confidence": "low",
+      "reason": "no_keyword_match",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/usage_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/orgs/usage_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:usage",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/virus_scanning_service.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/files/virus_scanning_service.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:virus_scanning",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/zillow_api_source.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/zillow_api_source.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:zillow",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/services/zillow_photo_source.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/files/zillow_photo_source.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:photo",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/tasks/ingestion_tasks.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:task",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/tasks/jurisdiction_tasks.py",
+      "bucket": "manual_split",
+      "target": null,
+      "confidence": "low",
+      "reason": "matched_product:jurisdiction;matched_platform:task",
+      "matched_product": "compliance"
+    },
+    {
+      "source": "backend/app/tasks/market_sync_tasks.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/market_sync_tasks.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:task",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/workers/agent_tasks.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/agent_tasks.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:task",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/workers/agent_worker.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/agent_worker.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:worker",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/workers/celery_app.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/celery_app.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:worker",
+      "matched_product": null
+    },
+    {
+      "source": "backend/app/workers/risk_tasks.py",
+      "bucket": "platform",
+      "target": "onehaven_onehaven_platform/backend/src/jobs/risk_tasks.py",
+      "confidence": "medium",
+      "reason": "matched_platform_keyword:task",
+      "matched_product": null
+    }
+  ],
+  "next_steps": [
+    "Review manual_split files first",
+    "Review unclear files second",
+    "Move high-confidence platform files next",
+    "Move product-owned service batches after that"
+  ]
+}

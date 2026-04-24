@@ -8,21 +8,21 @@ from typing import Any, Optional
 from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.domain.workflow.panes import (
+from onehaven_platform.backend.src.config import settings
+from onehaven_platform.backend.src.domain.workflow.panes import (
     PANES,
     allowed_panes_for_principal,
     clamp_pane,
     pane_catalog,
     pane_label,
 )
-from app.models import Deal, Property, UnderwritingResult
-from app.products.management.services.properties.state_machine import get_state_payload
-from app.products.investor_intelligence.services.risk_scoring import classify_deal_candidate, compute_risk_adjusted_score
-from app.domain.underwriting import compute_monthly_housing_costs
-from app.products.management.services.properties.inventory_snapshot_service import build_property_inventory_snapshot
-from app.services.property_tax_enrichment_service import get_property_tax_context
-from app.services.property_insurance_enrichment_service import get_property_insurance_context
+from onehaven_platform.backend.src.models import Deal, Property, UnderwritingResult
+from onehaven_platform.backend.src.services.state_machine_service import get_state_payload
+from products.intelligence.backend.src.services.risk_scoring import classify_deal_candidate, compute_risk_adjusted_score
+from products.intelligence.backend.src.domain.underwriting import compute_monthly_housing_costs
+from products.ops.backend.src.services.properties.inventory_snapshot_service import build_property_inventory_snapshot
+from products.intelligence.backend.src.services.property_tax_enrichment_service import get_property_tax_context
+from products.intelligence.backend.src.services.property_insurance_enrichment_service import get_property_insurance_context
 
 
 log = logging.getLogger("onehaven.panes")

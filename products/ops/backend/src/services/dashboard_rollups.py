@@ -5,8 +5,8 @@ import time
 from collections import defaultdict
 from typing import Any, Optional
 
-from app.products.management.services.properties.inventory_snapshot_service import build_inventory_snapshots_for_scope
-from app.services.runtime_metrics import METRICS
+from products.ops.backend.src.services.properties.inventory_snapshot_service import build_inventory_snapshots_for_scope
+from onehaven_platform.backend.src.observability.runtime_metrics import METRICS
 
 log = logging.getLogger("onehaven.dashboard_rollups")
 

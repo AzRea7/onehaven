@@ -24,20 +24,20 @@ import {
   Wallet,
 } from "lucide-react";
 
-import EmptyState from "@/components/EmptyState";
-import IngestionErrorsDrawer from "@/components/IngestionErrorsDrawer";
-import IngestionLaunchCard from "@/components/IngestionLaunchCard";
-import IngestionRunsPanel from "@/components/IngestionRunsPanel";
-import MarketSourcePackModal from "@/components/MarketSourcePackModal";
-import PageHero from "@/components/PageHero";
-import PageShell from "@/components/PageShell";
-import PaneSwitcher from "@/components/PaneSwitcher";
-import RiskBadges from "@/products/investor_intelligence/components/RiskBadges";
-import StatPill from "@/components/StatPill";
-import Surface from "@/components/Surface";
+import EmptyState from "packages/ui/onehaven_onehaven_platform/frontend/src/components/EmptyState";
+import IngestionErrorsDrawer from "onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer";
+import IngestionLaunchCard from "packages/ui/products/acquire/frontend/src/components/IngestionLaunchCard";
+import IngestionRunsPanel from "packages/ui/products/acquire/frontend/src/components/IngestionRunsPanel";
+import MarketSourcePackModal from "packages/ui/products/compliance/frontend/src/components/MarketSourcePackModal";
+import PageHero from "onehaven_onehaven_platform/frontend/src/shell/PageHero";
+import PageShell from "onehaven_onehaven_platform/frontend/src/shell/PageShell";
+import PaneSwitcher from "onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher";
+import RiskBadges from "products/intelligence/frontend/src/components/RiskBadges";
+import StatPill from "packages/ui/onehaven_onehaven_platform/frontend/src/components/StatPill";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
 import { api } from "@/lib/api";
 import type { SupportedMarket } from "@/lib/ingestionClient";
-import AppSelect from "@/components/AppSelect";
+import AppSelect from "packages/ui/onehaven_onehaven_platform/frontend/src/components/AppSelect";
 
 type Row = any;
 type MarketRow = SupportedMarket;

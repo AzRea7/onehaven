@@ -1,0 +1,54 @@
+{
+  "phase": 24,
+  "lane": "policy_assertions",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 6,
+  "would_move_count": 0,
+  "moved_count": 0,
+  "skipped_count": 6,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/__init__.py",
+      "target": "products/compliance/backend/src/services/policy_assertions/__init__.py",
+      "area": "policy_assertions",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/cleanup_service.py",
+      "target": "products/compliance/backend/src/services/policy_assertions/cleanup_service.py",
+      "area": "policy_assertions",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/extractor_service.py",
+      "target": "products/compliance/backend/src/services/policy_assertions/extractor_service.py",
+      "area": "policy_assertions",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/review_service.py",
+      "target": "products/compliance/backend/src/services/policy_assertions/review_service.py",
+      "area": "policy_assertions",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/truth_resolution_service.py",
+      "target": "products/compliance/backend/src/services/policy_assertions/truth_resolution_service.py",
+      "area": "policy_assertions",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/validation_service.py",
+      "target": "products/compliance/backend/src/services/policy_assertions/validation_service.py",
+      "area": "policy_assertions",
+      "status": "skipped",
+      "reason": "target_exists"
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "phase": 67,
+  "legacy_hit_count": 19,
+  "legacy_hits": [
+    {
+      "file": "apps/suite-web/src/app/App.tsx",
+      "pattern": "src/components/AppShell",
+      "match": "src/components/AppShell",
+      "line": 3
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/App.tsx",
+      "pattern": "src/components/AppShell",
+      "match": "src/components/AppShell",
+      "line": 3
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+      "pattern": "src/components/AnimatedBackdrop",
+      "match": "src/components/AnimatedBackdrop",
+      "line": 1
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/Artwork.tsx",
+      "pattern": "src/components/Artwork",
+      "match": "src/components/Artwork",
+      "line": 1
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "pattern": "src/components/Artwork",
+      "match": "src/components/Artwork",
+      "line": 4
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "pattern": "src/components/AgentRunCompare",
+      "match": "src/components/AgentRunCompare",
+      "line": 11
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "pattern": "src/components/AgentRunHistory",
+      "match": "src/components/AgentRunHistory",
+      "line": 12
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "pattern": "src/components/AgentSlots",
+      "match": "src/components/AgentSlots",
+      "line": 13
+    },
+    {
+      "file": "packages/ui/src/components/AnimatedBackdrop.tsx",
+      "pattern": "src/components/AnimatedBackdrop",
+      "match": "src/components/AnimatedBackdrop",
+      "line": 1
+    },
+    {
+      "file": "packages/ui/src/components/Artwork.tsx",
+      "pattern": "src/components/Artwork",
+      "match": "src/components/Artwork",
+      "line": 1
+    },
+    {
+      "file": "packages/ui/src/components/Golem.tsx",
+      "pattern": "src/components/Artwork",
+      "match": "src/components/Artwork",
+      "line": 4
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/AnimatedBackdrop.tsx",
+      "pattern": "src/components/AnimatedBackdrop",
+      "match": "src/components/AnimatedBackdrop",
+      "line": 1
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/components/Artwork.tsx",
+      "pattern": "src/components/Artwork",
+      "match": "src/components/Artwork",
+      "line": 1
+    },
+    {
+      "file": "products/compliance/backend/src/services/ComplianceDocumentUploader.tsx",
+      "pattern": "src/components/AppSelect",
+      "match": "src/components/AppSelect",
+      "line": 3
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/InspectionSchedulerModal.tsx",
+      "pattern": "src/components/AppSelect",
+      "match": "src/components/AppSelect",
+      "line": 4
+    },
+    {
+      "file": "products/compliance/frontend/src/components/ComplianceDocumentUploader.tsx",
+      "pattern": "src/components/AppSelect",
+      "match": "src/components/AppSelect",
+      "line": 3
+    },
+    {
+      "file": "products/compliance/frontend/src/components/InspectionSchedulerModal.tsx",
+      "pattern": "src/components/AppSelect",
+      "match": "src/components/AppSelect",
+      "line": 4
+    },
+    {
+      "file": "products/intelligence/frontend/src/pages/InvestorPane.tsx",
+      "pattern": "src/components/AppSelect",
+      "match": "src/components/AppSelect",
+      "line": 40
+    },
+    {
+      "file": "products/ops/frontend/src/components/PhotoUploader.tsx",
+      "pattern": "src/components/AppSelect",
+      "match": "src/components/AppSelect",
+      "line": 5
+    }
+  ],
+  "status": "needs_attention"
+}

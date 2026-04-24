@@ -26,14 +26,14 @@ from products.acquire.backend.src.services.acquisition_participant_service impor
     seed_listing_contacts_from_property,
 )
 from products.acquire.backend.src.services.document_parsing_service import parse_document
-from app.services.virus_scanning_service import scan_file
+from onehaven_platform.backend.src.services.virus_scanning_service import scan_file
 from products.acquire.backend.src.services.acquisition_tag_service import (
     DEFAULT_INVESTOR_PRESERVE_TAGS,
     list_property_tags,
     normalize_preserve_tags,
     replace_property_tags,
 )
-from app.products.management.services.properties.state_machine import get_state_payload, sync_property_state
+from onehaven_platform.backend.src.services.state_machine_service import get_state_payload, sync_property_state
 
 DEFAULT_REQUIRED_DOCS = [
     {"kind": "purchase_agreement", "label": "Purchase agreement"},

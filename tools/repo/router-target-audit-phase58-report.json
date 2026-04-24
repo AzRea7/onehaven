@@ -1,0 +1,143 @@
+{
+  "phase": 58,
+  "summary": {
+    "total": 13,
+    "identical": 10,
+    "different": 0,
+    "missing_target": 3,
+    "already_migrated": 0,
+    "missing_both": 0
+  },
+  "audits": [
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+      "target": "onehaven_onehaven_platform/backend/src/agents/agent_runs_router.py",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "24eaaf939be8e3c49146d82b20b271098ee9e8e05316cd0d362e05bcab66c031",
+      "target_hash": null,
+      "status": "missing_target",
+      "reason": "legacy_exists_but_target_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "target": "onehaven_onehaven_platform/backend/src/agents/agents_router.py",
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "c4d9504bbdfdc41c0e77d0ed5a7e53426165cc4a48cfdae7dc02148372615b2e",
+      "target_hash": null,
+      "status": "missing_target",
+      "reason": "legacy_exists_but_target_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/api_keys.py",
+      "target": "onehaven_onehaven_platform/backend/src/identity/interfaces/api_keys_router.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "b161079f2407ff381755a01c5d45506a8a1b5a311356ceeaa8335e564dd017e3",
+      "target_hash": "b161079f2407ff381755a01c5d45506a8a1b5a311356ceeaa8335e564dd017e3",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/auth.py",
+      "target": "onehaven_onehaven_platform/backend/src/identity/interfaces/auth_router.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "781f8256a203aa072313b62676250e3eadcde76d62d79aeb3bb6b1d87f748c67",
+      "target_hash": "781f8256a203aa072313b62676250e3eadcde76d62d79aeb3bb6b1d87f748c67",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/automation.py",
+      "target": "onehaven_onehaven_platform/backend/src/workflow/automation_router.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "d15446ced6b3a160d380fd7a01474df6c06ba0af32316cf40e455b0beb80fddb",
+      "target_hash": "d15446ced6b3a160d380fd7a01474df6c06ba0af32316cf40e455b0beb80fddb",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/geo.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/geo_router.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "31ac0a719f242584d22c5fb74a99964c459ef1192a86476b6732e241144456a9",
+      "target_hash": "31ac0a719f242584d22c5fb74a99964c459ef1192a86476b6732e241144456a9",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/health.py",
+      "target": "apps/suite-api/app/api/health/health.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "b9016ec4298fc2aad9b1e4bb22a45adcfbf0576c1d004d6730a32ed2c51fca56",
+      "target_hash": "b9016ec4298fc2aad9b1e4bb22a45adcfbf0576c1d004d6730a32ed2c51fca56",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports.py",
+      "target": "products/acquire/backend/src/routers/imports.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "05a1b331add07811c5ce996abdd8ec8874ee8988b7bb44839cc3feeeb31080db",
+      "target_hash": "05a1b331add07811c5ce996abdd8ec8874ee8988b7bb44839cc3feeeb31080db",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports_alias.py",
+      "target": "products/acquire/backend/src/routers/imports_alias.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "eb062e17edb863c8de37cb85ae02890863d02fc64d11197b66a4c5d097df743b",
+      "target_hash": "eb062e17edb863c8de37cb85ae02890863d02fc64d11197b66a4c5d097df743b",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ingestion.py",
+      "target": "onehaven_onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "cf584c87b031aa25e2036d99b51cd10fbd3d3f996f64b2131cfeb145e0a08ca0",
+      "target_hash": "cf584c87b031aa25e2036d99b51cd10fbd3d3f996f64b2131cfeb145e0a08ca0",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/meta.py",
+      "target": null,
+      "source_exists": true,
+      "target_exists": false,
+      "source_hash": "8a02ad3799976ee3c1f0c2860cbe618766e429aa8c72b9eb2e81b62da67bea6a",
+      "target_hash": null,
+      "status": "missing_target",
+      "reason": "legacy_exists_but_target_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "target": "products/ops/backend/src/routers/rehab.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "40d4b2c6e16632d5a1e9fe62bf0ae84b7626380e01cc04906107306dbf77ae6d",
+      "target_hash": "40d4b2c6e16632d5a1e9fe62bf0ae84b7626380e01cc04906107306dbf77ae6d",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent.py",
+      "target": "products/intelligence/backend/src/routers/rent.py",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "515f81a32831c9132f48f0618405a17eba659cdea7161f086aa3d3ee66adb32f",
+      "target_hash": "515f81a32831c9132f48f0618405a17eba659cdea7161f086aa3d3ee66adb32f",
+      "status": "identical",
+      "reason": "source_and_target_match"
+    }
+  ]
+}

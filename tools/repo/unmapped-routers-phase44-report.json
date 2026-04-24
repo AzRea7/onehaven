@@ -1,0 +1,92 @@
+{
+  "phase": 44,
+  "review_count": 12,
+  "mapped_now": 4,
+  "still_manual": 8,
+  "reviews": [
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/api_keys.py",
+      "suggested_target": "onehaven_onehaven_platform/backend/src/identity/interfaces/api_keys_router.py",
+      "owner": "platform",
+      "confidence": "medium",
+      "reason": "identity_router"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/audit.py",
+      "suggested_target": "onehaven_onehaven_platform/backend/src/audit/audit_router.py",
+      "owner": "platform",
+      "confidence": "medium",
+      "reason": "audit_router"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/auth.py",
+      "suggested_target": "onehaven_onehaven_platform/backend/src/identity/interfaces/auth_router.py",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "identity_router"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/health.py",
+      "suggested_target": "apps/suite-api/app/api/health/health.py",
+      "owner": "app",
+      "confidence": "high",
+      "reason": "health_runtime_router"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/metrics.py",
+      "suggested_target": null,
+      "owner": "manual_review",
+      "confidence": "low",
+      "reason": "no_explicit_router_mapping"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "suggested_target": null,
+      "owner": "manual_review",
+      "confidence": "low",
+      "reason": "no_explicit_router_mapping"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/photos.py",
+      "suggested_target": null,
+      "owner": "manual_review",
+      "confidence": "low",
+      "reason": "no_explicit_router_mapping"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/policy_seed.py",
+      "suggested_target": null,
+      "owner": "manual_review",
+      "confidence": "low",
+      "reason": "no_explicit_router_mapping"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent_enrich.py",
+      "suggested_target": null,
+      "owner": "manual_review",
+      "confidence": "low",
+      "reason": "no_explicit_router_mapping"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/streetview.py",
+      "suggested_target": null,
+      "owner": "manual_review",
+      "confidence": "low",
+      "reason": "no_explicit_router_mapping"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/trust.py",
+      "suggested_target": null,
+      "owner": "manual_review",
+      "confidence": "low",
+      "reason": "no_explicit_router_mapping"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/workflow.py",
+      "suggested_target": null,
+      "owner": "manual_review",
+      "confidence": "low",
+      "reason": "no_explicit_router_mapping"
+    }
+  ]
+}

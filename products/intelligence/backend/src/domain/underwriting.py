@@ -1,0 +1,513 @@
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Literal, Optional
+
+from onehaven_platform.backend.src.config import settings
+
+
+RentCapReason = Literal[
+    "rentcast_under_fmr",
+    "fmr_cap_applied",
+    "fmr_fallback",
+    "multifamily_fmr_times_units",
+    "multifamily_bedroom_mix",
+    "missing_rent_inputs",
+]
+
+
+@dataclass(frozen=True)
+class UnderwritingInputs:
+    purchase_price: float
+    rehab: float
+    down_payment_pct: float
+    interest_rate: float
+    term_years: int
+
+    gross_rent: float
+
+    vacancy_rate: float
+    maintenance_rate: float
+    management_rate: float
+    capex_rate: float
+
+    insurance_monthly: float
+    taxes_monthly: float
+    utilities_monthly: float
+
+
+@dataclass(frozen=True)
+class UnderwritingOutputs:
+    mortgage_payment: float
+    operating_expenses: float
+    noi: float
+    cash_flow: float
+    dscr: float
+    cash_on_cash: float
+    break_even_rent: float
+    min_rent_for_target_roi: float
+
+
+@dataclass(frozen=True)
+class PropertyTaxProfile:
+    annual_amount: float | None
+    annual_rate: float | None
+    source: str | None = None
+    confidence: float | None = None
+    year: int | None = None
+
+
+@dataclass(frozen=True)
+class PropertyInsuranceProfile:
+    annual_amount: float | None
+    source: str | None = None
+    confidence: float | None = None
+
+
+def normalize_tax_profile(*, annual_amount: float | None = None, annual_rate: float | None = None, asking_price: float | None = None, source: str | None = None, confidence: float | None = None, year: int | None = None) -> PropertyTaxProfile:
+    annual = _to_pos_float(annual_amount)
+    rate = _to_pos_float(annual_rate)
+    price = _to_pos_float(asking_price)
+    if annual is None and rate is not None and price is not None:
+        annual = rate * price
+    if rate is None and annual is not None and price is not None and price > 0:
+        rate = annual / price
+    return PropertyTaxProfile(
+        annual_amount=_round_money(annual),
+        annual_rate=round(float(rate), 6) if rate is not None else None,
+        source=(str(source).strip() or None) if source is not None else None,
+        confidence=round(float(confidence), 3) if confidence is not None else None,
+        year=int(year) if year is not None else None,
+    )
+
+
+def normalize_insurance_profile(*, annual_amount: float | None = None, source: str | None = None, confidence: float | None = None) -> PropertyInsuranceProfile:
+    annual = _to_pos_float(annual_amount)
+    return PropertyInsuranceProfile(
+        annual_amount=_round_money(annual),
+        source=(str(source).strip() or None) if source is not None else None,
+        confidence=round(float(confidence), 3) if confidence is not None else None,
+    )
+
+
+def compute_monthly_housing_costs(
+    *,
+    asking_price: float | None,
+    interest_rate: float,
+    term_years: int,
+    down_payment_pct: float,
+    tax_rate_annual: float | None = None,
+    taxes_annual: float | None = None,
+    insurance_annual: float | None = None,
+) -> dict[str, float | None]:
+    if asking_price is None or asking_price <= 0:
+        return {
+            "loan_amount": None,
+            "monthly_debt_service": None,
+            "monthly_taxes": None,
+            "monthly_insurance": None,
+            "monthly_housing_cost": None,
+        }
+
+    price = float(asking_price)
+    down_payment = price * float(down_payment_pct)
+    loan_amount = max(price - down_payment, 0.0)
+
+    monthly_rate = float(interest_rate) / 12.0
+    num_payments = int(term_years) * 12
+
+    if loan_amount <= 0:
+        monthly_pi = 0.0
+    elif monthly_rate <= 0:
+        monthly_pi = loan_amount / num_payments
+    else:
+        factor = pow(1.0 + monthly_rate, num_payments)
+        monthly_pi = loan_amount * (monthly_rate * factor) / (factor - 1.0)
+
+    monthly_taxes = None
+    if taxes_annual is not None:
+        monthly_taxes = float(taxes_annual) / 12.0
+    elif tax_rate_annual is not None:
+        monthly_taxes = (price * float(tax_rate_annual)) / 12.0
+
+    monthly_insurance = None
+    if insurance_annual is not None:
+        monthly_insurance = float(insurance_annual) / 12.0
+
+    total = monthly_pi
+    if monthly_taxes is not None:
+        total += monthly_taxes
+    if monthly_insurance is not None:
+        total += monthly_insurance
+
+    return {
+        "loan_amount": round(loan_amount, 2),
+        "monthly_debt_service": round(monthly_pi, 2),
+        "monthly_taxes": round(monthly_taxes, 2) if monthly_taxes is not None else None,
+        "monthly_insurance": round(monthly_insurance, 2) if monthly_insurance is not None else None,
+        "monthly_housing_cost": round(total, 2),
+    }
+
+
+def compute_trustworthy_investment_metrics(
+    *,
+    rent_used: float | None,
+    market_rent_estimate: float | None,
+    rent_reasonableness_comp: float | None,
+    monthly_debt_service: float | None,
+    monthly_taxes: float | None,
+    monthly_insurance: float | None,
+    monthly_housing_cost: float | None = None,
+    utilities_monthly: float | None = None,
+    vacancy_rate: float | None = None,
+    maintenance_rate: float | None = None,
+    management_rate: float | None = None,
+    capex_rate: float | None = None,
+) -> dict[str, float | None]:
+    """
+    Compute two layers of investor math from the current trusted inputs.
+
+    1) Headline / card cashflow:
+       gross rent - (mortgage + taxes + insurance)
+       This is the number intended for the Investor pane cards.
+
+    2) Detailed property spreadsheet math:
+       include vacancy, maintenance, management, capex, and utilities so the
+       full economics remain visible on the property detail page.
+
+    Utilities remain exposed for transparency, but the primary headline
+    cashflow intentionally excludes them so the model matches the desired
+    hybrid tenant contract structure.
+    """
+
+    gross_rent_used = _to_pos_float(rent_used)
+    market_reference_rent = select_market_rent_reference(
+        market_rent_estimate=market_rent_estimate,
+        rent_reasonableness_comp=rent_reasonableness_comp,
+    )
+
+    if gross_rent_used is None:
+        gross_rent_used = market_reference_rent
+
+    debt_service = _to_pos_float(monthly_debt_service)
+    taxes = float(monthly_taxes or 0.0)
+    insurance = float(monthly_insurance or 0.0)
+    utilities = float(utilities_monthly or 0.0)
+
+    vacancy = float(vacancy_rate if vacancy_rate is not None else getattr(settings, "vacancy_rate", 0.05))
+    maintenance = float(
+        maintenance_rate if maintenance_rate is not None else getattr(settings, "maintenance_rate", 0.10)
+    )
+    management = float(
+        management_rate if management_rate is not None else getattr(settings, "management_rate", 0.08)
+    )
+    capex = float(capex_rate if capex_rate is not None else getattr(settings, "capex_rate", 0.05))
+
+    housing_cost = monthly_housing_cost
+    if housing_cost is None:
+        housing_cost = (debt_service or 0.0) + taxes + insurance
+
+    if gross_rent_used is None:
+        return {
+            "gross_rent_used": None,
+            "market_reference_rent": _round_money(market_reference_rent),
+            "effective_gross_income": None,
+            "variable_operating_expenses": None,
+            "fixed_operating_expenses": _round_money(taxes + insurance + utilities),
+            "monthly_non_housing_operating_expenses": None,
+            "operating_expenses": None,
+            "noi": None,
+            "projected_monthly_cashflow": None,
+            "housing_only_cashflow": None,
+            "full_cycle_cashflow": None,
+            "spreadsheet_total_monthly_cost": None,
+            "dscr": None,
+            "rent_gap": _round_money(
+                (market_reference_rent - housing_cost)
+                if market_reference_rent is not None and housing_cost is not None
+                else None
+            ),
+            "utilities_monthly": _round_money(utilities),
+            "vacancy_rate_used": round(vacancy, 4),
+            "maintenance_rate_used": round(maintenance, 4),
+            "management_rate_used": round(management, 4),
+            "capex_rate_used": round(capex, 4),
+        }
+
+    effective_gross_income = float(gross_rent_used) * (1.0 - vacancy)
+    variable_operating_expenses = float(gross_rent_used) * (maintenance + management + capex)
+    fixed_operating_expenses = taxes + insurance + utilities
+    monthly_non_housing_operating_expenses = variable_operating_expenses + utilities
+    operating_expenses = variable_operating_expenses + fixed_operating_expenses
+    noi = effective_gross_income - operating_expenses
+
+    housing_only_cashflow = None
+    if housing_cost is not None:
+        housing_only_cashflow = float(gross_rent_used) - float(housing_cost)
+
+    full_cycle_cashflow = None
+    dscr = None
+    if debt_service is not None:
+        full_cycle_cashflow = noi - debt_service
+        dscr = (noi / debt_service) if debt_service > 1e-6 else None
+
+    spreadsheet_total_monthly_cost = None
+    if housing_cost is not None:
+        spreadsheet_total_monthly_cost = float(housing_cost) + float(variable_operating_expenses) + float(utilities)
+
+    rent_gap = None
+    if market_reference_rent is not None and housing_cost is not None:
+        rent_gap = float(market_reference_rent) - float(housing_cost)
+
+    return {
+        "gross_rent_used": _round_money(gross_rent_used),
+        "market_reference_rent": _round_money(market_reference_rent),
+        "effective_gross_income": _round_money(effective_gross_income),
+        "variable_operating_expenses": _round_money(variable_operating_expenses),
+        "fixed_operating_expenses": _round_money(fixed_operating_expenses),
+        "monthly_non_housing_operating_expenses": _round_money(monthly_non_housing_operating_expenses),
+        "operating_expenses": _round_money(operating_expenses),
+        "noi": _round_money(noi),
+        "projected_monthly_cashflow": _round_money(housing_only_cashflow),
+        "housing_only_cashflow": _round_money(housing_only_cashflow),
+        "full_cycle_cashflow": _round_money(full_cycle_cashflow),
+        "spreadsheet_total_monthly_cost": _round_money(spreadsheet_total_monthly_cost),
+        "dscr": round(float(dscr), 3) if dscr is not None else None,
+        "rent_gap": _round_money(rent_gap),
+        "utilities_monthly": _round_money(utilities),
+        "vacancy_rate_used": round(vacancy, 4),
+        "maintenance_rate_used": round(maintenance, 4),
+        "management_rate_used": round(management, 4),
+        "capex_rate_used": round(capex, 4),
+    }
+
+
+def _monthly_mortgage_payment(principal: float, annual_rate: float, term_years: int) -> float:
+    if principal <= 0 or term_years <= 0:
+        return 0.0
+    r = annual_rate / 12.0
+    n = term_years * 12
+    if r <= 0:
+        return principal / n
+    return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
+
+
+def _finite(x: float, *, fallback: float) -> float:
+    if x is None:
+        return fallback
+    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
+        return fallback
+    return float(x)
+
+
+def _to_pos_float(value: float | int | str | None) -> float | None:
+    try:
+        if value is None:
+            return None
+        out = float(value)
+        return out if out > 0 else None
+    except Exception:
+        return None
+
+
+def _round_money(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 2)
+
+
+def select_market_rent_reference(
+    *,
+    market_rent_estimate: float | None,
+    rent_reasonableness_comp: float | None,
+) -> float | None:
+    estimate = _to_pos_float(market_rent_estimate)
+    comp = _to_pos_float(rent_reasonableness_comp)
+
+    if estimate is not None and comp is not None:
+        return _round_money(min(float(estimate), float(comp)))
+    if comp is not None:
+        return _round_money(comp)
+    if estimate is not None:
+        return _round_money(estimate)
+    return None
+
+
+def _is_multifamily(property_type: str | None, units: int | None) -> bool:
+    ptype = (property_type or "").strip().lower()
+    return ("multi" in ptype) and max(int(units or 0), 0) > 1
+
+
+def compute_effective_rent_used(
+    *,
+    property_type: str | None,
+    bedrooms: int | None,
+    units: int | None,
+    rentcast_rent: float | None,
+    fmr_rent: float | None,
+    unit_rentcast_rent: float | None = None,
+    unit_fmr_rent: float | None = None,
+) -> tuple[float | None, RentCapReason]:
+    ptype = (property_type or "").strip().lower()
+    unit_count = max(int(units or 0), 0)
+
+    total_rentcast = _to_pos_float(rentcast_rent)
+    total_fmr = _to_pos_float(fmr_rent)
+    per_unit_rentcast = _to_pos_float(unit_rentcast_rent)
+    per_unit_fmr = _to_pos_float(unit_fmr_rent)
+
+    if _is_multifamily(ptype, unit_count):
+        if per_unit_rentcast is None and total_rentcast is not None and unit_count > 0:
+            per_unit_rentcast = total_rentcast / float(unit_count)
+        if per_unit_fmr is None and total_fmr is not None and unit_count > 0:
+            per_unit_fmr = total_fmr / float(unit_count)
+
+        if per_unit_rentcast is not None and per_unit_fmr is not None:
+            per_unit = min(float(per_unit_rentcast), float(per_unit_fmr))
+            return round(per_unit * unit_count, 2), "multifamily_fmr_times_units"
+        if per_unit_fmr is not None:
+            return round(float(per_unit_fmr) * unit_count, 2), "multifamily_fmr_times_units"
+        if per_unit_rentcast is not None:
+            return round(float(per_unit_rentcast) * unit_count, 2), "multifamily_fmr_times_units"
+        return None, "missing_rent_inputs"
+
+    if total_rentcast is not None and total_fmr is not None:
+        if float(total_rentcast) <= float(total_fmr):
+            return round(float(total_rentcast), 2), "rentcast_under_fmr"
+        return round(float(total_fmr), 2), "fmr_cap_applied"
+
+    if total_fmr is not None:
+        return round(float(total_fmr), 2), "fmr_fallback"
+
+    if total_rentcast is not None:
+        return round(float(total_rentcast), 2), "rentcast_under_fmr"
+
+    return None, "missing_rent_inputs"
+
+
+def describe_rent_cap_reason(reason: str, *, strategy: str = "section8") -> str:
+    normalized = str(reason or "missing_rent_inputs").strip().lower()
+    mode = str(strategy or "section8").strip().lower()
+
+    if mode == "market":
+        return "Market strategy uses the calibrated market rent estimate without a Section 8 cap."
+
+    mapping = {
+        "rentcast_under_fmr": "The conservative market-supported rent is below raw HUD FMR, so the lower market rent is used.",
+        "fmr_cap_applied": "The conservative market-supported rent is above raw HUD FMR, so the raw HUD FMR cap is applied.",
+        "fmr_fallback": "Market rent is missing, so raw HUD FMR is used as the fallback rent assumption.",
+        "multifamily_fmr_times_units": "Multifamily rent is capped per unit using HUD FMR and then multiplied by the property unit count.",
+        "multifamily_bedroom_mix": "Multifamily rent is computed from the stored bedroom mix and capped per unit before summing.",
+        "missing_rent_inputs": "Neither usable market rent nor usable HUD FMR inputs were available, so rent_used could not be computed.",
+    }
+    return mapping.get(normalized, "Rent assumption was computed from the shared underwriting rent rules.")
+
+
+def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> UnderwritingOutputs:
+    all_in_cost = float(inp.purchase_price) + float(inp.rehab)
+    down_payment = all_in_cost * float(inp.down_payment_pct)
+    loan_amount = max(all_in_cost - down_payment, 0.0)
+
+    mortgage_payment = _monthly_mortgage_payment(loan_amount, float(inp.interest_rate), int(inp.term_years))
+    effective_gross = float(inp.gross_rent) * (1.0 - float(inp.vacancy_rate))
+
+    var_opex = (
+        float(inp.gross_rent) * float(inp.maintenance_rate)
+        + float(inp.gross_rent) * float(inp.management_rate)
+        + float(inp.gross_rent) * float(inp.capex_rate)
+    )
+    fixed_opex = float(inp.insurance_monthly) + float(inp.taxes_monthly) + float(inp.utilities_monthly)
+    operating_expenses = var_opex + fixed_opex
+
+    noi = effective_gross - operating_expenses
+    cash_flow = noi - mortgage_payment
+
+    dscr = noi / mortgage_payment if mortgage_payment > 1e-6 else 999.0
+    cash_invested = max(down_payment, 0.0)
+    annual_cash_flow = cash_flow * 12.0
+    cash_on_cash = annual_cash_flow / cash_invested if cash_invested > 1e-6 else 999.0
+
+    a = (1.0 - float(inp.vacancy_rate)) - (
+        float(inp.maintenance_rate) + float(inp.management_rate) + float(inp.capex_rate)
+    )
+    b = fixed_opex + mortgage_payment
+
+    break_even_rent = (b / a) if a > 1e-6 else 999999.0
+
+    required_annual_cash_flow = float(target_roi) * cash_invested
+    required_monthly_cash_flow = required_annual_cash_flow / 12.0
+    min_rent_for_target_roi = (
+        (fixed_opex + mortgage_payment + required_monthly_cash_flow) / a if a > 1e-6 else 999999.0
+    )
+
+    dscr = _finite(dscr, fallback=0.0)
+    cash_on_cash = _finite(cash_on_cash, fallback=0.0)
+    break_even_rent = _finite(break_even_rent, fallback=0.0)
+    min_rent_for_target_roi = _finite(min_rent_for_target_roi, fallback=0.0)
+
+    return UnderwritingOutputs(
+        mortgage_payment=round(mortgage_payment, 2),
+        operating_expenses=round(operating_expenses, 2),
+        noi=round(noi, 2),
+        cash_flow=round(cash_flow, 2),
+        dscr=round(dscr, 3),
+        cash_on_cash=round(cash_on_cash, 3),
+        break_even_rent=round(break_even_rent, 2),
+        min_rent_for_target_roi=round(min_rent_for_target_roi, 2),
+    )
+
+
+def underwrite(
+    *,
+    purchase_price: Optional[float] = None,
+    asking_price: Optional[float] = None,
+    down_payment_pct: float,
+    interest_rate: float,
+    term_years: int,
+    gross_rent: float,
+    rehab_estimate: float = 0.0,
+    taxes_monthly: Optional[float] = None,
+    insurance_monthly: Optional[float] = None,
+    utilities_monthly: Optional[float] = None,
+) -> UnderwritingOutputs:
+    vacancy_rate = float(getattr(settings, "vacancy_rate", 0.05))
+    maintenance_rate = float(getattr(settings, "maintenance_rate", 0.10))
+    management_rate = float(getattr(settings, "management_rate", 0.08))
+    capex_rate = float(getattr(settings, "capex_rate", 0.05))
+    target_roi = float(getattr(settings, "target_roi", 0.15))
+
+    taxes_monthly = float(taxes_monthly) if taxes_monthly is not None else float(
+        getattr(settings, "taxes_monthly_default", 0.0)
+    )
+    insurance_monthly = float(insurance_monthly) if insurance_monthly is not None else float(
+        getattr(settings, "insurance_monthly_default", 0.0)
+    )
+    utilities_monthly = float(utilities_monthly) if utilities_monthly is not None else float(
+        getattr(settings, "utilities_monthly_default", 0.0)
+    )
+
+    if purchase_price is not None:
+        pp = float(purchase_price)
+    elif asking_price is not None:
+        pp = float(asking_price)
+    else:
+        raise ValueError("underwrite(): must provide purchase_price or asking_price")
+
+    inp = UnderwritingInputs(
+        purchase_price=float(pp),
+        rehab=float(rehab_estimate or 0.0),
+        down_payment_pct=float(down_payment_pct),
+        interest_rate=float(interest_rate),
+        term_years=int(term_years),
+        gross_rent=float(gross_rent),
+        vacancy_rate=float(vacancy_rate),
+        maintenance_rate=float(maintenance_rate),
+        management_rate=float(management_rate),
+        capex_rate=float(capex_rate),
+        insurance_monthly=float(insurance_monthly),
+        taxes_monthly=float(taxes_monthly),
+        utilities_monthly=float(utilities_monthly),
+    )
+
+    return run_underwriting(inp, target_roi=float(target_roi))

@@ -6,12 +6,12 @@ from typing import Any, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import normalize_category
-from app.policy_models import JurisdictionProfile, PolicyAssertion
-from app.products.compliance.services.policy_coverage.completeness_service import profile_completeness_payload
-from app.products.compliance.services.policy_coverage.lockout_service import profile_lockout_payload
-from app.products.compliance.services.policy_coverage.sla_service import collect_profile_source_sla_summary, profile_next_actions
-from app.products.compliance.services.policy_assertions.review_service import summarize_policy_overrides
+from onehaven_platform.backend.src.domain.policy.categories import normalize_category
+from onehaven_platform.backend.src.policy_models import JurisdictionProfile, PolicyAssertion
+from products.compliance.backend.src.services.policy_coverage.completeness_service import profile_completeness_payload
+from products.compliance.backend.src.services.policy_coverage.lockout_service import profile_lockout_payload
+from products.compliance.backend.src.services.policy_coverage.sla_service import collect_profile_source_sla_summary, profile_next_actions
+from products.compliance.backend.src.services.policy_assertions.review_service import summarize_policy_overrides
 
 
 _RULE_TO_CATEGORY = {

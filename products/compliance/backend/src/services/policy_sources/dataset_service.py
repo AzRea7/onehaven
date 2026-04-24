@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.domain.policy.evidence import (
+from onehaven_platform.backend.src.domain.policy.evidence import (
     EVIDENCE_TYPE_API,
     EVIDENCE_TYPE_DATASET,
     EVIDENCE_TYPE_PDF,
@@ -13,7 +13,7 @@ from app.domain.policy.evidence import (
     determine_truth_role,
     evidence_boundary_summary,
 )
-from app.products.compliance.services.policy_sources.catalog_admin_service import merged_catalog_for_market
+from products.compliance.backend.src.services.policy_sources.catalog_admin_service import merged_catalog_for_market
 
 
 def _norm_state(v: Optional[str]) -> str:

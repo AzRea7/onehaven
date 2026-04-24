@@ -6,26 +6,26 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal, require_owner
-from app.db import get_db
-from app.policy_models import JurisdictionProfile, PolicySource
-from app.schemas import (
+from onehaven_platform.backend.src.auth import get_principal, require_owner
+from onehaven_platform.backend.src.db import get_db
+from onehaven_platform.backend.src.policy_models import JurisdictionProfile, PolicySource
+from onehaven_platform.backend.src.schemas import (
     JurisdictionProfileIn,
     JurisdictionProfileOut,
     JurisdictionProfileResolveOut,
 )
-from app.products.compliance.services.policy_coverage.completeness_service import (
+from products.compliance.backend.src.services.policy_coverage.completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
-from app.services.jurisdiction_profile_service import (
+from products.compliance.backend.src.services.jurisdiction_profile_service import (
     _loads,
     delete_profile,
     list_profiles,
     resolve_profile,
     upsert_profile,
 )
-from app.services.jurisdiction_task_mapper import map_profile_jurisdiction_task_dicts
+from onehaven_platform.backend.src.services.jurisdiction_task_mapper_service import map_profile_jurisdiction_task_dicts
 
 router = APIRouter(prefix="/jurisdiction-profiles", tags=["jurisdiction_profiles"])
 
@@ -444,7 +444,7 @@ def resolve_for_property(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    from app.models import Property
+    from onehaven_platform.backend.src.models import Property
 
     prop = db.get(Property, int(property_id))
     if not prop or getattr(prop, "org_id", None) != p.org_id:
@@ -519,7 +519,7 @@ def get_profile_evidence(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_evidence_service import evidence_for_market
+    from products.compliance.backend.src.services.policy_evidence_service import evidence_for_market
     row = db.get(JurisdictionProfile, int(profile_id))
     if row is None:
         raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
@@ -540,7 +540,7 @@ def get_profile_datasets(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.products.compliance.services.policy_sources.dataset_service import dataset_snapshot_for_market
+    from products.compliance.backend.src.services.policy_sources.dataset_service import dataset_snapshot_for_market
     row = db.get(JurisdictionProfile, int(profile_id))
     if row is None:
         raise HTTPException(status_code=404, detail="Jurisdiction profile not found")

@@ -1,0 +1,3706 @@
+{
+  "phase": 85,
+  "summary": {
+    "cross_owner_edges": 616,
+    "ops_compliance_risky_edges": 0
+  },
+  "risky_edges": [],
+  "edges": [
+    {
+      "file": "products/acquire/backend/src/routers/acquisition.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/acquisition.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/acquisition.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.fingerprint"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.importers.investorlift"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.importers.zillow"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.operating_truth"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.geo_enrichment"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.photo_service"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports_alias.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports_alias.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.virus_scanning_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_workspace_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/document_ingestion_router_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_dedupe_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rent_refresh_queue_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.address_normalization"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.geo_enrichment"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.evaluate"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.rent"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "from_owner": "acquire",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.middleware.structured_logging"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.address_normalization"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.locks_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_listing_source"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.jobs.celery_app"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.middleware.structured_logging"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.policy_governance.refresh_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.locks_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_source_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_source_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_source_service.py",
+      "from_owner": "acquire",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/portfolio_ingestion_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/acquire/backend/src/services/portfolio_ingestion_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.property_normalization_service"
+    },
+    {
+      "file": "products/acquire/backend/src/services/product_ingestion_router_service.py",
+      "from_owner": "acquire",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.product_surfaces"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/compliance_completion.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_readiness_service"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/defaults.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/expected_universe.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/hqs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/hqs_library.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/hqs_library.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/hqs_precheck_agent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.agents.llm_router"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/hqs_precheck_agent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/jurisdiction_scoring.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/jurisdiction_scoring.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/jurisdiction_scoring.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agents.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agents.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agents.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agents.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agents.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.agents.registry"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agents.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.agent_engine"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agent_runs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agent_runs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agent_runs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agent_runs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.agent_engine"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agent_runs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.agent_orchestrator"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agent_runs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.jobs.agent_tasks"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/api_keys.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/api_keys.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/api_keys.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/api_keys.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/audit.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/audit.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/audit.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/audit.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/auth.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/auth.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/auth.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/auth.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/auth.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/auth.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/auth.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/auth.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/automation.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/automation.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_completion_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_failure_task_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_readiness_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/geo.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/geo.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/geo.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/geo.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.geo_enrichment"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/geo.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.fingerprint"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.importers.investorlift"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.importers.zillow"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.operating_truth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.geo_enrichment"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_enrichment_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.photo_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports_alias.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports_alias.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_execute"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_scheduler_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.portfolio_watchlist_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.jobs.ingestion_tasks"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.events_facade"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_failure_task_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_readiness_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.ownership"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_failure_task_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.defaults"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.jobs.jurisdiction_tasks"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.jurisdiction_task_mapper_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/llm_router.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/llm_router.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.agents.contracts"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/llm_router.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.integrations.lm_studio_client"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/markets.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/markets.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/markets.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_sync_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/markets.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.jobs.ingestion_tasks"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/meta.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/metrics.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.observability.runtime_metrics"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ops.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ops.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ops.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ops.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.dashboard_rollup_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ops.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.photo_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.virus_scanning_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_catalog_admin.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_catalog_admin.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_catalog_admin.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_evidence.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_evidence.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_evidence.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_evidence_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_evidence_version_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_seed.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_seed.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.product_surfaces"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.csv_import_mapping_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.document_ingestion_router_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "from_owner": "compliance",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.portfolio_ingestion_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.events"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.photo_rehab_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.integrations.federal_register"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.integrations.govinfo"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.events"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.rent_learning"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.section8.rent_rules"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.underwriting"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.budget_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.fmr"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.rent_learning"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.section8.rent_rules"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.underwriting"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/streetview.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/streetview.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/streetview.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/trust.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/trust.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.workflow.panes"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.workflow.stages"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_document_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_document_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.virus_scanning_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_photo_analysis_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_photo_analysis_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.photo_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_failure_task_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_readiness_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspection_scheduling_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspection_scheduling_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.events_facade"
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.defaults"
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_task_mapper.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_task_mapper.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.photo_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.virus_scanning_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photo_rehab_agent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.agents.llm_router"
+    },
+    {
+      "file": "products/compliance/backend/src/services/photo_rehab_agent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_crawl_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_evidence_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_evidence_version_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_market_seed_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_rule_normalizer.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_seed.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_photo_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_photo_service.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.zillow_photo_source"
+    },
+    {
+      "file": "products/compliance/backend/src/services/trust_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.workflow.stages"
+    },
+    {
+      "file": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.pane_routing_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/compliance/compliance_completion.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_readiness_service"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/compliance/hqs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/compliance/hqs_library.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/compliance/hqs_library.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/inspection/compliance_completion.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_readiness_service"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/inspection/hqs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/inspection/hqs_library.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/domain/inspection/hqs_library.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_engine/evidence_rollup_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/failure_task_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/failure_task_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/hqs.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/hqs_library.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/hqs_library.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/hqs_precheck_agent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.agents.llm_router"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/hqs_precheck_agent.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.events_facade"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_failure_task_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_readiness_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.ownership"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.inspection_failure_task_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspection_scheduling_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspection_scheduling_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.events_facade"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/template_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/cleanup_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/extractor_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/extractor_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/review_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/review_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/truth_resolution_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.authority"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/truth_resolution_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.conflicts"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/truth_resolution_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.evidence"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/truth_resolution_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.materiality"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/truth_resolution_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/validation_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/validation_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.defaults"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.jurisdiction_scoring_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/expected_universe.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/expected_universe_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.expected_universe"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/lockout_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/lockout_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/sla_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/sla_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/notification_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/notification_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/rules_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/rules_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.defaults"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/rules_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/rules_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/catalog_admin_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/crawl_inventory_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/crawl_inventory_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/dataset_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.evidence"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/discovery_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/discovery_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/ingestion_source_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/ingestion_source_service.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/ingestion_source_service.py",
+      "from_owner": "compliance",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.market_catalog_service"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/policy_catalog_admin.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/policy_catalog_admin.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/policy_catalog_admin.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/policy_crawl_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/rentcast_listing_source.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/source_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.policy.categories"
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/source_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/compliance/backend/src/services/product/compliance_brief_service.py",
+      "from_owner": "compliance",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/clients/rentcast.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/deal_intake.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/deal_intake.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.jurisdiction_profile_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/decision_engine.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/rent_explain_runs.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/rent_learning.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/rent_learning.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/underwrite_agent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/underwrite_agent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.agents.llm_router"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/underwrite_agent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/underwriting.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.events_facade"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.ownership"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.operating_truth_enforcement"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.events_facade"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.events_facade"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.ownership"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/evaluate.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/evaluate.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/evaluate.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/evaluate.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.events"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/evaluate.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.jurisdiction_scoring_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/evaluate.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/evaluate.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.integrations.federal_register"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.integrations.govinfo"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.events"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.section8.rent_rules"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.budget_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.section8.rent_rules"
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.trust_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/deal_intelligence_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/deal_intelligence_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_engine.brief_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/external_budget.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/hud_fmr_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_scheduler_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.workflow.panes"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.services.properties.inventory_snapshot_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.services.properties.inventory_snapshot_service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.observability.runtime_metrics"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/property_tax_enrichment_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/property_tax_enrichment_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.tax.service"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/rentcast_listing_source.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/rentcast_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/rent_comp_selection.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/rent_comp_selection.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.policy_models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/rent_refresh_queue_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/rent_refresh_queue_service.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/intelligence/backend/src/services/risk_scoring.py",
+      "from_owner": "intelligence",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/ops/backend/src/domain/next_actions_agent.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.agents.llm_router"
+    },
+    {
+      "file": "products/ops/backend/src/domain/next_actions_agent.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/ops/backend/src/domain/ops_judge.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.workflow.panes"
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.dashboard_rollup_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.ownership"
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.pane_dashboard_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/ops.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/ops/backend/src/routers/ops.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/ops/backend/src/routers/ops.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/ops/backend/src/routers/ops.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.dashboard_rollup_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/ops.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/ops.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.jurisdiction_scoring_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.geo_enrichment"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.acquisition_tag_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.acquisition_participant_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_price_resolution_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.rent_learning"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.events"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.photo_rehab_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/dashboard_rollups.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.observability.runtime_metrics"
+    },
+    {
+      "file": "products/ops/backend/src/services/photo_rehab_agent.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/ops/backend/src/services/photo_rehab_agent.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.domain.underwriting"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.observability.runtime_metrics"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.acquisition_tag_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.compliance_projection_service"
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/ops_summary_service.py",
+      "from_owner": "ops",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.audit"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.events_facade"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.ownership"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.state_machine_service"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.stage_guard_service"
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "from_owner": "tenants",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "products/tenants/backend/src/services/inspector_communication_service.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/tenants/backend/src/services/lease_rules.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "products/tenants/backend/src/services/tenant_match_service.py",
+      "from_owner": "tenants",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_execute"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_scheduler_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_execute"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_enrichment_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_run_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/acquire_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.services.ingestion_source_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.workflow_gate_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.workflow_gate_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_document_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_photo_analysis_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/compliance_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.compliance_photo_analysis_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_tax_enrichment_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.property_insurance_enrichment_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rentcast_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/intelligence_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.risk_scoring"
+    },
+    {
+      "file": "onehaven_platform/backend/src/adapters/ops_adapter.py",
+      "from_owner": "platform",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.services.properties.inventory_snapshot_service"
+    },
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rent_refresh_queue_service"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.config"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.logging_config"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.middleware.request_id"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.middleware.structured_logging"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.routers.dashboard"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.routers.properties"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.routers.rehab"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "ops",
+      "module": "products.ops.backend.src.routers.ops"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.deals"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.evaluate"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.rent"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.rent_enrich"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.cash"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.routers.equity"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.routers.imports"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.routers.imports_alias"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "acquire",
+      "module": "products.acquire.backend.src.routers.acquisition"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.markets"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.jurisdictions"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.compliance"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.inspections"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.photos"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.trust"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.jurisdiction_profiles"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.policy_seed"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.policy_evidence"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.policy"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.routers.policy_catalog_admin"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "tenants",
+      "module": "products.tenants.backend.src.routers.tenants"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.agents.agents_router"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.agents.agent_runs_router"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.workflow.workflow"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.audit.audit_router"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.identity.interfaces.auth_router"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.identity.interfaces.api_keys_router"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.workflow.automation_router"
+    },
+    {
+      "file": "apps/suite_api/app/main.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.integrations.ingestion_router"
+    },
+    {
+      "file": "apps/suite_api/app/api/health/meta.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agents.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agents.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agents.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agents.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.schemas"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agents.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.domain.agents.registry"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agents.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.agent_engine"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agents.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agents.py",
+      "from_owner": "app",
+      "to_owner": "compliance",
+      "module": "products.compliance.backend.src.services.trust_service"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agent_runs.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.auth"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agent_runs.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agent_runs.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.models"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agent_runs.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.agent_engine"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agent_runs.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.services.agent_orchestrator"
+    },
+    {
+      "file": "apps/suite_api/app/api/suite/agent_runs.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.jobs.agent_tasks"
+    },
+    {
+      "file": "apps/suite_api/db/alembic/env.py",
+      "from_owner": "app",
+      "to_owner": "platform",
+      "module": "onehaven_platform.backend.src.db"
+    }
+  ]
+}

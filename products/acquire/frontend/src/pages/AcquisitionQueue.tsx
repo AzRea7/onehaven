@@ -31,12 +31,12 @@ import AcquisitionTagBar from "products/acquire/frontend/src/components/Acquisit
 import DocumentFieldReviewPanel, {
   type FieldValueRow,
 } from "products/acquire/frontend/src/components/DocumentFieldReviewPanel";
-import EmptyState from "@/components/EmptyState";
-import Golem from "@/components/Golem";
-import PageHero from "@/components/PageHero";
-import PageShell from "@/components/PageShell";
-import ShortlistBoard from "@/products/investor_intelligence/components/ShortlistBoard";
-import Surface from "@/components/Surface";
+import EmptyState from "packages/ui/onehaven_onehaven_platform/frontend/src/components/EmptyState";
+import Golem from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Golem";
+import PageHero from "onehaven_onehaven_platform/frontend/src/shell/PageHero";
+import PageShell from "onehaven_onehaven_platform/frontend/src/shell/PageShell";
+import ShortlistBoard from "products/intelligence/frontend/src/components/ShortlistBoard";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
 import { api } from "@/lib/api";
 
 type QueueItem = {

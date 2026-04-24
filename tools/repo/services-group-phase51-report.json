@@ -1,0 +1,2267 @@
+{
+  "phase": 51,
+  "dry_run": false,
+  "mapping_count": 66,
+  "rule_count": 47,
+  "flagged_file_count": 137,
+  "rewrite_file_count": 137,
+  "rewrites": [
+    {
+      "file": "apps/suite-api/app/api/suite/agents.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/rewrite_imports_strong.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.jurisdiction_task_mapper",
+          "pattern": "\\bapp\\.services\\.jurisdiction_task_mapper\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_task_mapper",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/scripts/repair_rentcast_listing_fields.py",
+      "replacements": [
+        {
+          "rule": "app.services.rentcast_listing_source",
+          "pattern": "\\bapp\\.services\\.rentcast_listing_source\\b",
+          "replacement": "products.intelligence.backend.src.services.rentcast_listing_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/clients/hud_user.py",
+      "replacements": [
+        {
+          "rule": "app.services.fmr",
+          "pattern": "\\bapp\\.services\\.fmr\\b",
+          "replacement": "products.intelligence.backend.src.services.fmr",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/automation.py",
+      "replacements": [
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/imports.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_enrichment_service",
+          "pattern": "\\bapp\\.services\\.ingestion_enrichment_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_service",
+          "pattern": "\\bapp\\.services\\.ingestion_run_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_photo_service",
+          "pattern": "\\bapp\\.services\\.property_photo_service\\b",
+          "replacement": "products.ops.backend.src.services.property_photo_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/ingestion.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_service",
+          "pattern": "\\bapp\\.services\\.ingestion_run_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_catalog_service",
+          "pattern": "\\bapp\\.services\\.market_catalog_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_catalog_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.portfolio_watchlist_service",
+          "pattern": "\\bapp\\.services\\.portfolio_watchlist_service\\b",
+          "replacement": "products.intelligence.backend.src.services.portfolio_watchlist_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_insurance_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_insurance_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_tax_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_tax_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_tax_enrichment_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "replacements": [
+        {
+          "rule": "app.services.photo_rehab_agent",
+          "pattern": "\\bapp\\.services\\.photo_rehab_agent\\b",
+          "replacement": "products.ops.backend.src.services.photo_rehab_agent",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/seed/jurisdictions_seed.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.jurisdiction_registry_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_registry_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_registry_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/events_facade.py",
+      "replacements": [
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/ingestion_run_execute.py",
+      "replacements": [
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.rentcast_listing_source",
+          "pattern": "\\bapp\\.services\\.rentcast_listing_source\\b",
+          "replacement": "products.intelligence.backend.src.services.rentcast_listing_source",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_enrichment_service",
+          "pattern": "\\bapp\\.services\\.ingestion_enrichment_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_service",
+          "pattern": "\\bapp\\.services\\.ingestion_run_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_dedupe_service",
+          "pattern": "\\bapp\\.services\\.ingestion_dedupe_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_dedupe_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.locks_service",
+          "pattern": "\\bapp\\.services\\.locks_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.locks_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/ingestion_scheduler_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/inspection_scheduling_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.inspector_communication_service",
+          "pattern": "\\bapp\\.services\\.inspector_communication_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspector_communication_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/jurisdiction_profile_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_registry_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_registry_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_registry_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.jurisdiction_source_family_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_source_family_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_source_family_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/market_sync_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/policy_market_seed_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_catalog",
+          "pattern": "\\bapp\\.services\\.policy_catalog\\b",
+          "replacement": "products.compliance.backend.src.services.policy_catalog",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/product_ingestion_router_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.csv_import_mapping_service",
+          "pattern": "\\bapp\\.services\\.csv_import_mapping_service\\b",
+          "replacement": "products.acquire.backend.src.services.csv_import_mapping_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.portfolio_ingestion_service",
+          "pattern": "\\bapp\\.services\\.portfolio_ingestion_service\\b",
+          "replacement": "products.acquire.backend.src.services.portfolio_ingestion_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/property_photo_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/property_tax_enrichment_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_price_resolution_service",
+          "pattern": "\\bapp\\.services\\.property_price_resolution_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_price_resolution_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/tasks/ingestion_tasks.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_enrichment_service",
+          "pattern": "\\bapp\\.services\\.ingestion_enrichment_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.locks_service",
+          "pattern": "\\bapp\\.services\\.locks_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.locks_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.rent_refresh_queue_service",
+          "pattern": "\\bapp\\.services\\.rent_refresh_queue_service\\b",
+          "replacement": "products.intelligence.backend.src.services.rent_refresh_queue_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/tasks/market_sync_tasks.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/workers/agent_tasks.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/executor.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/registry.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.hud_fmr_service",
+          "pattern": "\\bapp\\.services\\.hud_fmr_service\\b",
+          "replacement": "products.intelligence.backend.src.services.hud_fmr_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/importers/zillow.py",
+      "replacements": [
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/impl/deal_intake.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "replacements": [
+        {
+          "rule": "app.services.hud_fmr_service",
+          "pattern": "\\bapp\\.services\\.hud_fmr_service\\b",
+          "replacement": "products.intelligence.backend.src.services.hud_fmr_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.virus_scanning_service",
+          "pattern": "\\bapp\\.services\\.virus_scanning_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.virus_scanning_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_photo_analysis_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_photo_service",
+          "pattern": "\\bapp\\.services\\.property_photo_service\\b",
+          "replacement": "products.ops.backend.src.services.property_photo_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.pane_routing_service",
+          "pattern": "\\bapp\\.services\\.pane_routing_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.pane_routing_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_change_detection_service",
+          "pattern": "\\bapp\\.services\\.policy_change_detection_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_change_detection_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/tax/adapters/bsa_adapter.py",
+      "replacements": [
+        {
+          "rule": "app.services.public_tax_lookup_service",
+          "pattern": "\\bapp\\.services\\.public_tax_lookup_service\\b",
+          "replacement": "products.intelligence.backend.src.services.public_tax_lookup_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_10_automated_ingestion/test_ingestion_collect_matching_rows_sharded.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_10_automated_ingestion/test_ingestion_county_optional_filters.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_10_automated_ingestion/test_ingestion_dedupe_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_dedupe_service",
+          "pattern": "\\bapp\\.services\\.ingestion_dedupe_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_dedupe_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_10_automated_ingestion/test_ingestion_pipeline_post_import.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_enrichment_service",
+          "pattern": "\\bapp\\.services\\.ingestion_enrichment_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_enrichment_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_10_automated_ingestion/test_ingestion_run_execute.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "3"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_10_automated_ingestion/test_ingestion_source_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_16_location_automation/test_ingestion_daily_sync_defaults.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_16_location_automation/test_property_location_refresh.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_19_compliance_scheduler/test_inspection_reminders.py",
+      "replacements": [
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "3"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_19_compliance_scheduler/test_inspection_scheduling_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_20_platform_hardening/conftest.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "6"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_20_platform_hardening/test_duplicate_ingestion_protection.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_20_platform_hardening/test_end_to_end_property_pipeline.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_20_platform_hardening/test_external_api_failure_recovery.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_20_platform_hardening/test_premium_poc_contracts.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_20_platform_hardening/test_scheduler_locking.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "9"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_9_rehab_from_photos/test_property_photo_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_9_rehab_from_photos/test_zillow_photo_source.py",
+      "replacements": [
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/files/photos.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_photo_service",
+          "pattern": "\\bapp\\.services\\.property_photo_service\\b",
+          "replacement": "products.ops.backend.src.services.property_photo_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.virus_scanning_service",
+          "pattern": "\\bapp\\.services\\.virus_scanning_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.virus_scanning_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/files/property_photo_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/integrations/bsa_adapter.py",
+      "replacements": [
+        {
+          "rule": "app.services.public_tax_lookup_service",
+          "pattern": "\\bapp\\.services\\.public_tax_lookup_service\\b",
+          "replacement": "products.intelligence.backend.src.services.public_tax_lookup_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/integrations/hud_user.py",
+      "replacements": [
+        {
+          "rule": "app.services.fmr",
+          "pattern": "\\bapp\\.services\\.fmr\\b",
+          "replacement": "products.intelligence.backend.src.services.fmr",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/integrations/ingestion_router.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_service",
+          "pattern": "\\bapp\\.services\\.ingestion_run_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_catalog_service",
+          "pattern": "\\bapp\\.services\\.market_catalog_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_catalog_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.portfolio_watchlist_service",
+          "pattern": "\\bapp\\.services\\.portfolio_watchlist_service\\b",
+          "replacement": "products.intelligence.backend.src.services.portfolio_watchlist_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_insurance_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_insurance_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_tax_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_tax_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_tax_enrichment_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/integrations/property_tax_enrichment_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_price_resolution_service",
+          "pattern": "\\bapp\\.services\\.property_price_resolution_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_price_resolution_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/integrations/zillow.py",
+      "replacements": [
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/jobs/agent_tasks.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_enrichment_service",
+          "pattern": "\\bapp\\.services\\.ingestion_enrichment_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.locks_service",
+          "pattern": "\\bapp\\.services\\.locks_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.locks_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.rent_refresh_queue_service",
+          "pattern": "\\bapp\\.services\\.rent_refresh_queue_service\\b",
+          "replacement": "products.intelligence.backend.src.services.rent_refresh_queue_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/jobs/market_sync_tasks.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/observability/metrics.py",
+      "replacements": [
+        {
+          "rule": "app.services.runtime_metrics",
+          "pattern": "\\bapp\\.services\\.runtime_metrics\\b",
+          "replacement": "onehaven_platform.backend.src.observability.runtime_metrics",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/services/events_facade.py",
+      "replacements": [
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/workflow/automation_router.py",
+      "replacements": [
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/workflow/workflow.py",
+      "replacements": [
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/agents/executor.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/agents/registry.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.hud_fmr_service",
+          "pattern": "\\bapp\\.services\\.hud_fmr_service\\b",
+          "replacement": "products.intelligence.backend.src.services.hud_fmr_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/agents/impl/deal_intake.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/agents/impl/rent_reasonableness_agent.py",
+      "replacements": [
+        {
+          "rule": "app.services.hud_fmr_service",
+          "pattern": "\\bapp\\.services\\.hud_fmr_service\\b",
+          "replacement": "products.intelligence.backend.src.services.hud_fmr_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_enrichment_service",
+          "pattern": "\\bapp\\.services\\.ingestion_enrichment_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_service",
+          "pattern": "\\bapp\\.services\\.ingestion_run_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_photo_service",
+          "pattern": "\\bapp\\.services\\.property_photo_service\\b",
+          "replacement": "products.ops.backend.src.services.property_photo_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.virus_scanning_service",
+          "pattern": "\\bapp\\.services\\.virus_scanning_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.virus_scanning_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "replacements": [
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.rentcast_listing_source",
+          "pattern": "\\bapp\\.services\\.rentcast_listing_source\\b",
+          "replacement": "products.intelligence.backend.src.services.rentcast_listing_source",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_enrichment_service",
+          "pattern": "\\bapp\\.services\\.ingestion_enrichment_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_service",
+          "pattern": "\\bapp\\.services\\.ingestion_run_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_dedupe_service",
+          "pattern": "\\bapp\\.services\\.ingestion_dedupe_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_dedupe_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.locks_service",
+          "pattern": "\\bapp\\.services\\.locks_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.locks_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/backend/src/services/product_ingestion_router_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.csv_import_mapping_service",
+          "pattern": "\\bapp\\.services\\.csv_import_mapping_service\\b",
+          "replacement": "products.acquire.backend.src.services.csv_import_mapping_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.portfolio_ingestion_service",
+          "pattern": "\\bapp\\.services\\.portfolio_ingestion_service\\b",
+          "replacement": "products.acquire.backend.src.services.portfolio_ingestion_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/agents.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/automation.py",
+      "replacements": [
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.inspector_communication_service",
+          "pattern": "\\bapp\\.services\\.inspector_communication_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspector_communication_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_enrichment_service",
+          "pattern": "\\bapp\\.services\\.ingestion_enrichment_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_service",
+          "pattern": "\\bapp\\.services\\.ingestion_run_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_photo_service",
+          "pattern": "\\bapp\\.services\\.property_photo_service\\b",
+          "replacement": "products.ops.backend.src.services.property_photo_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/ingestion.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_service",
+          "pattern": "\\bapp\\.services\\.ingestion_run_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_source_service",
+          "pattern": "\\bapp\\.services\\.ingestion_source_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_source_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ingestion_run_execute",
+          "pattern": "\\bapp\\.services\\.ingestion_run_execute\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_run_execute",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_catalog_service",
+          "pattern": "\\bapp\\.services\\.market_catalog_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_catalog_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.portfolio_watchlist_service",
+          "pattern": "\\bapp\\.services\\.portfolio_watchlist_service\\b",
+          "replacement": "products.intelligence.backend.src.services.portfolio_watchlist_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_insurance_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_insurance_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_tax_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_tax_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_tax_enrichment_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "replacements": [
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.inspector_communication_service",
+          "pattern": "\\bapp\\.services\\.inspector_communication_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspector_communication_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ownership",
+          "pattern": "\\bapp\\.services\\.ownership\\b",
+          "replacement": "onehaven_platform.backend.src.services.ownership",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_evidence_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_evidence_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.jurisdiction_task_mapper",
+          "pattern": "\\bapp\\.services\\.jurisdiction_task_mapper\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_task_mapper",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_evidence_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/markets.py",
+      "replacements": [
+        {
+          "rule": "app.services.market_sync_service",
+          "pattern": "\\bapp\\.services\\.market_sync_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_sync_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.market_catalog_service",
+          "pattern": "\\bapp\\.services\\.market_catalog_service\\b",
+          "replacement": "products.intelligence.backend.src.services.market_catalog_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_evidence_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/metrics.py",
+      "replacements": [
+        {
+          "rule": "app.services.runtime_metrics",
+          "pattern": "\\bapp\\.services\\.runtime_metrics\\b",
+          "replacement": "onehaven_platform.backend.src.observability.runtime_metrics",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/photos.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_photo_service",
+          "pattern": "\\bapp\\.services\\.property_photo_service\\b",
+          "replacement": "products.ops.backend.src.services.property_photo_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.virus_scanning_service",
+          "pattern": "\\bapp\\.services\\.virus_scanning_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.virus_scanning_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_catalog",
+          "pattern": "\\bapp\\.services\\.policy_catalog\\b",
+          "replacement": "products.compliance.backend.src.services.policy_catalog",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_evidence_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_evidence_version_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_version_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_version_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_evidence.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_evidence_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_service",
+          "count": "2"
+        },
+        {
+          "rule": "app.services.policy_evidence_version_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_version_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_version_service",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_seed.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_seed",
+          "pattern": "\\bapp\\.services\\.policy_seed\\b",
+          "replacement": "products.compliance.backend.src.services.policy_seed",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.csv_import_mapping_service",
+          "pattern": "\\bapp\\.services\\.csv_import_mapping_service\\b",
+          "replacement": "products.acquire.backend.src.services.csv_import_mapping_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.portfolio_ingestion_service",
+          "pattern": "\\bapp\\.services\\.portfolio_ingestion_service\\b",
+          "replacement": "products.acquire.backend.src.services.portfolio_ingestion_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "replacements": [
+        {
+          "rule": "app.services.photo_rehab_agent",
+          "pattern": "\\bapp\\.services\\.photo_rehab_agent\\b",
+          "replacement": "products.ops.backend.src.services.photo_rehab_agent",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.fmr",
+          "pattern": "\\bapp\\.services\\.fmr\\b",
+          "replacement": "products.intelligence.backend.src.services.fmr",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.rentcast_service",
+          "pattern": "\\bapp\\.services\\.rentcast_service\\b",
+          "replacement": "products.intelligence.backend.src.services.rentcast_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/trust.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/workflow.py",
+      "replacements": [
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_document_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.virus_scanning_service",
+          "pattern": "\\bapp\\.services\\.virus_scanning_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.virus_scanning_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_photo_analysis_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_photo_service",
+          "pattern": "\\bapp\\.services\\.property_photo_service\\b",
+          "replacement": "products.ops.backend.src.services.property_photo_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspection_scheduling_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.inspector_communication_service",
+          "pattern": "\\bapp\\.services\\.inspector_communication_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspector_communication_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_registry_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_registry_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_registry_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.jurisdiction_source_family_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_source_family_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_source_family_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/photos.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_photo_service",
+          "pattern": "\\bapp\\.services\\.property_photo_service\\b",
+          "replacement": "products.ops.backend.src.services.property_photo_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.virus_scanning_service",
+          "pattern": "\\bapp\\.services\\.virus_scanning_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.virus_scanning_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_market_seed_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_catalog",
+          "pattern": "\\bapp\\.services\\.policy_catalog\\b",
+          "replacement": "products.compliance.backend.src.services.policy_catalog",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_photo_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.pane_routing_service",
+          "pattern": "\\bapp\\.services\\.pane_routing_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.pane_routing_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "replacements": [
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.inspector_communication_service",
+          "pattern": "\\bapp\\.services\\.inspector_communication_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspector_communication_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ownership",
+          "pattern": "\\bapp\\.services\\.ownership\\b",
+          "replacement": "onehaven_platform.backend.src.services.ownership",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_evidence_service",
+          "pattern": "\\bapp\\.services\\.policy_evidence_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_evidence_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspection_scheduling_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.inspector_communication_service",
+          "pattern": "\\bapp\\.services\\.inspector_communication_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspector_communication_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.inspection_scheduling_service",
+          "pattern": "\\bapp\\.services\\.inspection_scheduling_service\\b",
+          "replacement": "products.compliance.backend.src.services.inspection_scheduling_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/template_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/extractor_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_rule_normalizer",
+          "pattern": "\\bapp\\.services\\.policy_rule_normalizer\\b",
+          "replacement": "products.compliance.backend.src.services.policy_rule_normalizer",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/review_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_rule_normalizer",
+          "pattern": "\\bapp\\.services\\.policy_rule_normalizer\\b",
+          "replacement": "products.compliance.backend.src.services.policy_rule_normalizer",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/validation_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_change_detection_service",
+          "pattern": "\\bapp\\.services\\.policy_change_detection_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_change_detection_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_change_detection_service",
+          "pattern": "\\bapp\\.services\\.policy_change_detection_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_change_detection_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_change_detection_service",
+          "pattern": "\\bapp\\.services\\.policy_change_detection_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_change_detection_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/catalog_admin_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_catalog",
+          "pattern": "\\bapp\\.services\\.policy_catalog\\b",
+          "replacement": "products.compliance.backend.src.services.policy_catalog",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/discovery_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_registry_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_registry_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_registry_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.jurisdiction_source_family_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_source_family_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_source_family_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_change_detection_service",
+          "pattern": "\\bapp\\.services\\.policy_change_detection_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_change_detection_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/source_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.policy_catalog",
+          "pattern": "\\bapp\\.services\\.policy_catalog\\b",
+          "replacement": "products.compliance.backend.src.services.policy_catalog",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_change_detection_service",
+          "pattern": "\\bapp\\.services\\.policy_change_detection_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_change_detection_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.policy_crawl_service",
+          "pattern": "\\bapp\\.services\\.policy_crawl_service\\b",
+          "replacement": "products.compliance.backend.src.services.policy_crawl_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/deal_intake.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_profile_service",
+          "pattern": "\\bapp\\.services\\.jurisdiction_profile_service\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_profile_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "replacements": [
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ownership",
+          "pattern": "\\bapp\\.services\\.ownership\\b",
+          "replacement": "onehaven_platform.backend.src.services.ownership",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "replacements": [
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "replacements": [
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ownership",
+          "pattern": "\\bapp\\.services\\.ownership\\b",
+          "replacement": "onehaven_platform.backend.src.services.ownership",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "replacements": [
+        {
+          "rule": "app.services.trust_service",
+          "pattern": "\\bapp\\.services\\.trust_service\\b",
+          "replacement": "products.compliance.backend.src.services.trust_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.fmr",
+          "pattern": "\\bapp\\.services\\.fmr\\b",
+          "replacement": "products.intelligence.backend.src.services.fmr",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.rentcast_service",
+          "pattern": "\\bapp\\.services\\.rentcast_service\\b",
+          "replacement": "products.intelligence.backend.src.services.rentcast_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/market_sync_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.ingestion_scheduler_service",
+          "pattern": "\\bapp\\.services\\.ingestion_scheduler_service\\b",
+          "replacement": "products.acquire.backend.src.services.ingestion_scheduler_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_insurance_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_insurance_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_tax_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_tax_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_tax_enrichment_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.runtime_metrics",
+          "pattern": "\\bapp\\.services\\.runtime_metrics\\b",
+          "replacement": "onehaven_platform.backend.src.observability.runtime_metrics",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/property_tax_enrichment_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_price_resolution_service",
+          "pattern": "\\bapp\\.services\\.property_price_resolution_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_price_resolution_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/risk_scoring.py",
+      "replacements": [
+        {
+          "rule": "app.services.crime_index",
+          "pattern": "\\bapp\\.services\\.crime_index\\b",
+          "replacement": "products.intelligence.backend.src.services.crime_index",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.offender_index",
+          "pattern": "\\bapp\\.services\\.offender_index\\b",
+          "replacement": "products.intelligence.backend.src.services.offender_index",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "replacements": [
+        {
+          "rule": "app.services.ownership",
+          "pattern": "\\bapp\\.services\\.ownership\\b",
+          "replacement": "onehaven_platform.backend.src.services.ownership",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_insurance_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_insurance_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_tax_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_tax_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_tax_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_price_resolution_service",
+          "pattern": "\\bapp\\.services\\.property_price_resolution_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_price_resolution_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "replacements": [
+        {
+          "rule": "app.services.photo_rehab_agent",
+          "pattern": "\\bapp\\.services\\.photo_rehab_agent\\b",
+          "replacement": "products.ops.backend.src.services.photo_rehab_agent",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/dashboard_rollups.py",
+      "replacements": [
+        {
+          "rule": "app.services.runtime_metrics",
+          "pattern": "\\bapp\\.services\\.runtime_metrics\\b",
+          "replacement": "onehaven_platform.backend.src.observability.runtime_metrics",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/property_photo_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.zillow_photo_source",
+          "pattern": "\\bapp\\.services\\.zillow_photo_source\\b",
+          "replacement": "products.intelligence.backend.src.services.zillow_photo_source",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "app.services.property_insurance_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_insurance_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_insurance_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.property_tax_enrichment_service",
+          "pattern": "\\bapp\\.services\\.property_tax_enrichment_service\\b",
+          "replacement": "products.intelligence.backend.src.services.property_tax_enrichment_service",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.runtime_metrics",
+          "pattern": "\\bapp\\.services\\.runtime_metrics\\b",
+          "replacement": "onehaven_platform.backend.src.observability.runtime_metrics",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/state_machine.py",
+      "replacements": [
+        {
+          "rule": "app.services.jurisdiction_task_mapper",
+          "pattern": "\\bapp\\.services\\.jurisdiction_task_mapper\\b",
+          "replacement": "products.compliance.backend.src.services.jurisdiction_task_mapper",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.pane_routing_service",
+          "pattern": "\\bapp\\.services\\.pane_routing_service\\b",
+          "replacement": "onehaven_platform.backend.src.services.pane_routing_service",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "replacements": [
+        {
+          "rule": "app.services.stage_guard",
+          "pattern": "\\bapp\\.services\\.stage_guard\\b",
+          "replacement": "products.ops.backend.src.services.stage_guard",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.events_facade",
+          "pattern": "\\bapp\\.services\\.events_facade\\b",
+          "replacement": "onehaven_platform.backend.src.services.events_facade",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.ownership",
+          "pattern": "\\bapp\\.services\\.ownership\\b",
+          "replacement": "onehaven_platform.backend.src.services.ownership",
+          "count": "1"
+        },
+        {
+          "rule": "app.services.lease_rules",
+          "pattern": "\\bapp\\.services\\.lease_rules\\b",
+          "replacement": "products.tenants.backend.src.services.lease_rules",
+          "count": "1"
+        }
+      ]
+    }
+  ]
+}

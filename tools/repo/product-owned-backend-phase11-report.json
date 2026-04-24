@@ -1,0 +1,237 @@
+{
+  "phase": 11,
+  "description": "Move product-owned backend files",
+  "dry_run": false,
+  "remove_legacy": false,
+  "selected_product": "compliance",
+  "candidate_count": 32,
+  "would_move_count": 0,
+  "moved_count": 31,
+  "skipped_count": 1,
+  "results": [
+    {
+      "source": "backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "target": "products/compliance/backend/src/domain/hqs_precheck_agent.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/__init__.py",
+      "target": "products/compliance/backend/src/domain/__init__.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/checklist_templates.py",
+      "target": "products/compliance/backend/src/domain/checklist_templates.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/compliance_completion.py",
+      "target": "products/compliance/backend/src/domain/compliance_completion.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/compliance_stats.py",
+      "target": "products/compliance/backend/src/domain/compliance_stats.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/hqs.py",
+      "target": "products/compliance/backend/src/domain/hqs.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/hqs_library.py",
+      "target": "products/compliance/backend/src/domain/hqs_library.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/inspection_mapping.py",
+      "target": "products/compliance/backend/src/domain/inspection_mapping.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/inspection_rules.py",
+      "target": "products/compliance/backend/src/domain/inspection_rules.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance/top_fail_points.py",
+      "target": "products/compliance/backend/src/domain/top_fail_points.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/compliance.py",
+      "target": "products/compliance/backend/src/domain/compliance.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/jurisdiction_scoring.py",
+      "target": "products/compliance/backend/src/domain/jurisdiction_scoring.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/policy/__init__.py",
+      "target": "products/compliance/backend/src/domain/__init__.py",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "backend/app/domain/policy/categories.py",
+      "target": "products/compliance/backend/src/domain/categories.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/policy/conflicts.py",
+      "target": "products/compliance/backend/src/domain/conflicts.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/policy/decisions.py",
+      "target": "products/compliance/backend/src/domain/decisions.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/policy/defaults.py",
+      "target": "products/compliance/backend/src/domain/defaults.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/policy/evidence.py",
+      "target": "products/compliance/backend/src/domain/evidence.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/policy/expected_universe.py",
+      "target": "products/compliance/backend/src/domain/expected_universe.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/domain/policy/materiality.py",
+      "target": "products/compliance/backend/src/domain/materiality.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/routers/policy_seed.py",
+      "target": "products/compliance/backend/src/routers/policy_seed.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/inspection_scheduling_service.py",
+      "target": "products/compliance/backend/src/services/inspection_scheduling_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_profile_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_registry_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_registry_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_source_family_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_source_family_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/policy_change_detection_service.py",
+      "target": "products/compliance/backend/src/services/policy_change_detection_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/policy_crawl_service.py",
+      "target": "products/compliance/backend/src/services/policy_crawl_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/policy_evidence_service.py",
+      "target": "products/compliance/backend/src/services/policy_evidence_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/policy_evidence_version_service.py",
+      "target": "products/compliance/backend/src/services/policy_evidence_version_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/policy_market_seed_service.py",
+      "target": "products/compliance/backend/src/services/policy_market_seed_service.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/policy_rule_normalizer.py",
+      "target": "products/compliance/backend/src/services/policy_rule_normalizer.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "backend/app/services/policy_seed.py",
+      "target": "products/compliance/backend/src/services/policy_seed.py",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ]
+}

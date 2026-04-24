@@ -1,0 +1,214 @@
+{
+  "phase": 13,
+  "product": "intelligence",
+  "dry_run": false,
+  "phase12_legacy_hit_count_before": 26,
+  "rewrite_file_count": 17,
+  "rewrites": [
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/geo.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_dashboard_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_summary_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/dashboard.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/state_machine.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/state_machine.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/intelligence-backend-validate-phase12-report.json",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod_alt",
+          "pattern": "\\bbackend\\.app\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        },
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "25"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/intelligence-validation-report.json",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "10"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/rewrite_product_backend_imports_phase13.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod_alt",
+          "pattern": "\\bbackend\\.app\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        },
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/validate_product_backend_refs_phase12.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod_alt",
+          "pattern": "\\bbackend\\.app\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        },
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/validate_product_migration.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.investor_intelligence\\b",
+          "replacement": "products.intelligence.backend.src",
+          "count": "1"
+        }
+      ]
+    }
+  ]
+}

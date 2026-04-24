@@ -1,0 +1,273 @@
+{
+  "phase": 26,
+  "lane": "compliance_engine",
+  "dry_run": false,
+  "phase25_legacy_hit_count_before": 30,
+  "rewrite_file_count": 24,
+  "rewrites": [
+    {
+      "file": "onehaven_decision_engine/backend/app/services/jurisdiction_profile_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/brief_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_document_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/failure_task_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/deal_intelligence_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.compliance_engine\\b",
+          "replacement": "products.compliance.backend.src.services.compliance_engine",
+          "count": "1"
+        }
+      ]
+    }
+  ]
+}

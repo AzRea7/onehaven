@@ -1,0 +1,236 @@
+{
+  "phase": 24,
+  "lane": "router",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 32,
+  "would_move_count": 0,
+  "moved_count": 24,
+  "skipped_count": 8,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/llm_router.py",
+      "target": "products/compliance/backend/src/routers/llm_router.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/__init__.py",
+      "target": "products/compliance/backend/src/routers/__init__.py",
+      "area": "router",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "target": "products/compliance/backend/src/routers/compliance.py",
+      "area": "router",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdiction_profiles.py",
+      "target": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "area": "router",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "target": "products/compliance/backend/src/routers/jurisdictions.py",
+      "area": "router",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/markets.py",
+      "target": "products/compliance/backend/src/routers/markets.py",
+      "area": "router",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "target": "products/compliance/backend/src/routers/policy.py",
+      "area": "router",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_evidence.py",
+      "target": "products/compliance/backend/src/routers/policy_evidence.py",
+      "area": "router",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+      "target": "products/compliance/backend/src/routers/agent_runs.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "target": "products/compliance/backend/src/routers/agents.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/api_keys.py",
+      "target": "products/compliance/backend/src/routers/api_keys.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/audit.py",
+      "target": "products/compliance/backend/src/routers/audit.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/auth.py",
+      "target": "products/compliance/backend/src/routers/auth.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/automation.py",
+      "target": "products/compliance/backend/src/routers/automation.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/geo.py",
+      "target": "products/compliance/backend/src/routers/geo.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/health.py",
+      "target": "products/compliance/backend/src/routers/health.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports.py",
+      "target": "products/compliance/backend/src/routers/imports.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports_alias.py",
+      "target": "products/compliance/backend/src/routers/imports_alias.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ingestion.py",
+      "target": "products/compliance/backend/src/routers/ingestion.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/meta.py",
+      "target": "products/compliance/backend/src/routers/meta.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/metrics.py",
+      "target": "products/compliance/backend/src/routers/metrics.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "target": "products/compliance/backend/src/routers/ops.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/policy_seed.py",
+      "target": "products/compliance/backend/src/routers/policy_seed.py",
+      "area": "router",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "target": "products/compliance/backend/src/routers/rehab.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent.py",
+      "target": "products/compliance/backend/src/routers/rent.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent_enrich.py",
+      "target": "products/compliance/backend/src/routers/rent_enrich.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/streetview.py",
+      "target": "products/compliance/backend/src/routers/streetview.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/trust.py",
+      "target": "products/compliance/backend/src/routers/trust.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/workflow.py",
+      "target": "products/compliance/backend/src/routers/workflow.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_service.py",
+      "target": "products/compliance/backend/src/routers/policy_evidence_service.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_version_service.py",
+      "target": "products/compliance/backend/src/routers/policy_evidence_version_service.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_ingestion_router_service.py",
+      "target": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "area": "router",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ]
+}

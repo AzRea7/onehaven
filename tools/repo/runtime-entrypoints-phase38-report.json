@@ -1,0 +1,44 @@
+{
+  "phase": 38,
+  "summary": {
+    "files_checked": 7,
+    "files_with_hits": 0
+  },
+  "results": {
+    "legacy_backend_main": {
+      "file": "onehaven_decision_engine/backend/app/main.py",
+      "exists": true,
+      "hits": []
+    },
+    "legacy_frontend_app": {
+      "file": "onehaven_decision_engine/frontend/src/App.tsx",
+      "exists": true,
+      "hits": []
+    },
+    "legacy_frontend_main": {
+      "file": "onehaven_decision_engine/frontend/src/main.tsx",
+      "exists": true,
+      "hits": []
+    },
+    "suite_api_main": {
+      "file": "apps/suite-api/app/main.py",
+      "exists": true,
+      "hits": []
+    },
+    "suite_web_app": {
+      "file": "apps/suite-web/src/app/App.tsx",
+      "exists": true,
+      "hits": []
+    },
+    "suite_web_main": {
+      "file": "apps/suite-web/src/bootstrap/main.tsx",
+      "exists": true,
+      "hits": []
+    },
+    "worker_main": {
+      "file": "apps/worker/app/worker_main.py",
+      "exists": true,
+      "hits": []
+    }
+  }
+}

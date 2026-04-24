@@ -1,0 +1,38 @@
+{
+  "phase": 79,
+  "summary": {
+    "total": 3,
+    "identical": 0,
+    "different": 1,
+    "missing_target": 0
+  },
+  "audits": [
+    {
+      "source": "onehaven_decision_engine/backend/app/main.py",
+      "target": "apps/suite-api/app/main.py",
+      "status": "different",
+      "source_exists": true,
+      "target_exists": true,
+      "source_hash": "0142a98c36428b9e5bbc0007a43d2f908c8a464748e23887f39f47372dfcf0f4",
+      "target_hash": "ba27fc1d6997849921d425947062f8ba685acb9adff02c37e84e5907dba3fc9e"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/App.tsx",
+      "target": "apps/suite-web/src/app/App.tsx",
+      "status": "already_migrated",
+      "source_exists": false,
+      "target_exists": true,
+      "source_hash": null,
+      "target_hash": "5501db0a49b60832bf2e8ed15eb3baa210ecd557584c6207cf6a4a1203947ded"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/main.tsx",
+      "target": "apps/suite-web/src/bootstrap/main.tsx",
+      "status": "already_migrated",
+      "source_exists": false,
+      "target_exists": true,
+      "source_hash": null,
+      "target_hash": "9f69fdc39f7ee3898242c4bba16cf17848d14aaa012bc2a65c5e9723777c21b3"
+    }
+  ]
+}

@@ -8,13 +8,13 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.domain.compliance.hqs import summarize_items
-from app.domain.compliance.inspection_rules import (
+from products.compliance.backend.src.domain.inspection.hqs import summarize_items
+from products.compliance.backend.src.domain.inspection.inspection_rules import (
     normalize_inspection_item_status,
     score_readiness,
 )
-from app.models import Inspection, InspectionItem, PropertyChecklistItem
-from app.products.compliance.services.compliance_engine.projection_service import build_property_projection_snapshot, rebuild_property_projection
+from onehaven_platform.backend.src.models import Inspection, InspectionItem, PropertyChecklistItem
+from onehaven_platform.backend.src.services.compliance_projection_service import build_property_projection_snapshot, rebuild_property_projection
 
 
 def _rollback_quietly(db: Session) -> None:
@@ -50,7 +50,7 @@ def _safe_property_jurisdiction_blocker(
     property_id: int,
 ) -> dict[str, Any]:
     try:
-        from app.products.compliance.services.workflow_gate_service import build_property_jurisdiction_blocker
+        from products.compliance.backend.src.services import build_property_jurisdiction_blocker
 
         result = build_property_jurisdiction_blocker(
             db,
@@ -686,7 +686,7 @@ def build_property_readiness_with_schedule(
     Chunk 2 helper: combine readiness posture with appointment/reminder state.
     Imported lazily to avoid circular imports.
     """
-    from app.services.inspection_scheduling_service import build_property_schedule_summary
+    from products.compliance.backend.src.services.inspection_scheduling_service import build_property_schedule_summary
 
     readiness = build_property_readiness_summary(
         db,

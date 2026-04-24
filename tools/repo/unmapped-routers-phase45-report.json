@@ -1,0 +1,96 @@
+{
+  "phase": 45,
+  "dry_run": false,
+  "remove_legacy": false,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/api_keys.py",
+      "target": "onehaven_onehaven_platform/backend/src/identity/interfaces/api_keys_router.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/audit.py",
+      "target": "onehaven_onehaven_platform/backend/src/audit/audit_router.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/auth.py",
+      "target": "onehaven_onehaven_platform/backend/src/identity/interfaces/auth_router.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/health.py",
+      "target": "apps/suite-api/app/api/health/health.py",
+      "owner": "app",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/metrics.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/photos.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/policy_seed.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent_enrich.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/streetview.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/trust.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/workflow.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    }
+  ],
+  "summary": {
+    "would_move": 0,
+    "moved": 2,
+    "skipped": 10
+  }
+}

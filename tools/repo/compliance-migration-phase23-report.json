@@ -1,0 +1,2185 @@
+{
+  "phase": 23,
+  "description": "Compliance-specific migration planning report",
+  "file_count": 270,
+  "summary": {
+    "manual_review": 130,
+    "inspections": 18,
+    "documents": 10,
+    "router": 32,
+    "frontend_components": 39,
+    "policy_coverage": 9,
+    "policy_sources": 18,
+    "compliance_engine": 4,
+    "policy_assertions": 6,
+    "policy_governance": 4
+  },
+  "records": [
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/apply.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/contracts.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/executor.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/deal_intake.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/hqs_precheck_agent.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:hqs",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/next_actions_agent.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/ops_judge.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/packet_builder_agent.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/photo_rehab_agent.py",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/photo_rehab_agent.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:photo",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/public_records_check.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/timeline_nudger.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/underwrite_agent.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/llm_router.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/llm_router.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/registry.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/run_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/validate.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/audit.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/cashflow.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/__init__.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/checklist_templates.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/checklist_templates.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:template",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/compliance_completion.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/compliance_completion.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/compliance_stats.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/compliance_stats.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/hqs.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:hqs",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs_library.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/hqs_library.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:hqs",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_mapping.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/inspection_mapping.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_rules.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/inspection_rules.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/photo_to_hqs_mapper.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/photo_to_hqs_mapper.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:hqs",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/top_fail_points.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/top_fail_points.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/compliance.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/decision_engine.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/events.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/fingerprint.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/base.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/investorlift.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/zillow.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/jurisdiction_scoring.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/jurisdiction_scoring.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Jurisdiction",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth_enforcement.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/__init__.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/authority.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/authority.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/categories.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/categories.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/conflicts.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/conflicts.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/decisions.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/decisions.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/defaults.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/defaults.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/evidence.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/evidence.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/expected_universe.py",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/expected_universe.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:expected_universe",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/materiality.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/materiality.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_explain_runs.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_learning.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/section8/rent_rules.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/shared/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/underwriting.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/valuation_cadence.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/workflow/panes.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/workflow/stages.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/__init__.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/__init__.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/compliance.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/inspections.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdiction_profiles.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/jurisdictions.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/markets.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/markets.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/policy.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_catalog_admin.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/policy_catalog_admin.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:catalog",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_evidence.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/policy_evidence.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__init__.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/compliance_document_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:document",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/__init__.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/brief_service.py",
+      "area": "compliance_engine",
+      "suggested_target": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:brief_service",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/evidence_rollup_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/evidence_rollup_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/fix_plan_service.py",
+      "area": "compliance_engine",
+      "suggested_target": "products/compliance/backend/src/services/compliance_engine/fix_plan_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:fix_plan",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/inspection_risk_service.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/inspection_risk_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/projection_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/projection_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/recommendation_service.py",
+      "area": "compliance_engine",
+      "suggested_target": "products/compliance/backend/src/services/compliance_engine/recommendation_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:recommendation",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/revenue_risk_service.py",
+      "area": "compliance_engine",
+      "suggested_target": "products/compliance/backend/src/services/compliance_engine/revenue_risk_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:revenue_risk",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_photo_analysis_service.py",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/compliance_photo_analysis_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:photo",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/compliance_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/__init__.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/failure_task_service.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/failure_task_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/import_nspire_service.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/import_nspire_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/readiness_service.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/template_service.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/template_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/__init__.py",
+      "area": "policy_assertions",
+      "suggested_target": "products/compliance/backend/src/services/policy_assertions/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:assertion",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/cleanup_service.py",
+      "area": "policy_assertions",
+      "suggested_target": "products/compliance/backend/src/services/policy_assertions/cleanup_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:assertion",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/extractor_service.py",
+      "area": "policy_assertions",
+      "suggested_target": "products/compliance/backend/src/services/policy_assertions/extractor_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:assertion",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/review_service.py",
+      "area": "policy_assertions",
+      "suggested_target": "products/compliance/backend/src/services/policy_assertions/review_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:assertion",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/truth_resolution_service.py",
+      "area": "policy_assertions",
+      "suggested_target": "products/compliance/backend/src/services/policy_assertions/truth_resolution_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:truth_resolution",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/validation_service.py",
+      "area": "policy_assertions",
+      "suggested_target": "products/compliance/backend/src/services/policy_assertions/validation_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:assertion",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/__init__.py",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:coverage",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/completeness_service.py",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:coverage",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/coverage_service.py",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:coverage",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/expected_universe_service.py",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/expected_universe_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:coverage",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/health_service.py",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:coverage",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/lockout_service.py",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/lockout_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:coverage",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/sla_service.py",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/sla_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:coverage",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/__init__.py",
+      "area": "policy_governance",
+      "suggested_target": "products/compliance/backend/src/services/policy_governance/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:governance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/notification_service.py",
+      "area": "policy_governance",
+      "suggested_target": "products/compliance/backend/src/services/policy_governance/notification_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:governance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "area": "policy_governance",
+      "suggested_target": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:governance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/rules_service.py",
+      "area": "policy_governance",
+      "suggested_target": "products/compliance/backend/src/services/policy_governance/rules_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:rules_service",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__init__.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/pipeline_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/__init__.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/catalog_admin_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/catalog_admin_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:catalog",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/crawl_inventory_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/crawl_inventory_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:crawl",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/dataset_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/dataset_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:dataset",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/discovery_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/discovery_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/fetch_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/fetch_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:fetch",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/source_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/source_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/property_compliance_resolution_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/workflow_gate_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/agent_runs.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/agents.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/api_keys.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/api_keys.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/audit.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/audit.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/auth.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/auth.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/automation.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/automation.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/geo.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/geo.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/health.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/health.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/imports.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports_alias.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/imports_alias.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ingestion.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/ingestion.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/meta.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/meta.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/metrics.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/metrics.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/ops.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/photos.py",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/photos.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:photo",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/policy_seed.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/policy_seed.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/rehab.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/rent.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent_enrich.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/rent_enrich.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/streetview.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/streetview.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/trust.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/trust.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/workflow.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/workflow.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/address_normalization.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_actions.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_concurrency.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_engine.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator_runtime.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_threads.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_trace.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/auth_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/budget_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/crime_index.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/csv_import_mapping_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/events_facade.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/external_budget.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/fmr.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocode_cache_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocoding_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/hud_fmr_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_dedupe_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_enrichment_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_execute.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_scheduler_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_source_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/ingestion_source_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspection_scheduling_service.py",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/inspection_scheduling_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspector_communication_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_profile_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/jurisdiction_profile_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Jurisdiction",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_registry_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/jurisdiction_registry_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Jurisdiction",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_source_family_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/jurisdiction_source_family_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_task_mapper.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/jurisdiction_task_mapper.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Jurisdiction",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/lease_rules.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/locks_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_catalog_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/market_catalog_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:catalog",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_sync_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/offender_index.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/onboarding_flows.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ownership.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/pane_routing_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/photo_rehab_agent.py",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/photo_rehab_agent.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:photo",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/plan_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_catalog.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/policy_catalog.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:catalog",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_change_detection_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/policy_change_detection_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_crawl_service.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/policy_crawl_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:crawl",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_service.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/policy_evidence_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:policy_evidence",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_version_service.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/policy_evidence_version_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:policy_evidence",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_market_seed_service.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/policy_market_seed_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_rule_normalizer.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/policy_rule_normalizer.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_seed.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/policy_seed.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_ingestion_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_watchlist_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_ingestion_router_service.py",
+      "area": "router",
+      "suggested_target": "products/compliance/backend/src/routers/product_ingestion_router_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:router",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_surfaces.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_insurance_enrichment_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_normalization_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_photo_service.py",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/property_photo_service.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:photo",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_price_resolution_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_tax_enrichment_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/public_tax_lookup_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_comp_selection.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_refresh_queue_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_listing_source.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/rentcast_listing_source.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/runtime_metrics.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/shared/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/__init__.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/bsa_adapter.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/county_rate_adapter.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/public_record_adapter.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/base.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/cache.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/fallbacks.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/registry.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/trust_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/usage_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/virus_scanning_service.py",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/zillow_api_source.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/zillow_api_source.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/zillow_photo_source.py",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/zillow_photo_source.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Artwork.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AuroraBackground.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/EmptyState.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/FilterBar.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlassCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionSourcesPanel.tsx",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/IngestionSourcesPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/KpiCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/MarketSourcePackModal.tsx",
+      "area": "policy_sources",
+      "suggested_target": "products/compliance/backend/src/services/policy_sources/MarketSourcePackModal.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:source",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageHero.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageShell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PaneSwitcher.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/RehabFromPhotosCTA.tsx",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/RehabFromPhotosCTA.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:photo",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Spinner.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatCard.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatPill.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Surface.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/VirtualList.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/JurisdictionProfiles.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:Jurisdiction",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/Jurisdictions.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:Jurisdiction",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/PolicyReview.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:Policy",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Register.tsx",
+      "area": "manual_review",
+      "suggested_target": null,
+      "confidence": "low",
+      "reason": "no_specific_compliance_lane_match",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/__init__.py",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/__init__.py",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "backend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceDocumentStack.tsx",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/ComplianceDocumentStack.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:document",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceDocumentUploader.tsx",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/ComplianceDocumentUploader.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:document",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/CompliancePhotoFindingsPanel.tsx",
+      "area": "documents",
+      "suggested_target": "products/compliance/backend/src/services/CompliancePhotoFindingsPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:photo",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceReminderPanel.tsx",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/ComplianceReminderPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionReadiness.tsx",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/InspectionReadiness.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionSchedulerModal.tsx",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/InspectionSchedulerModal.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionTimelineCard.tsx",
+      "area": "inspections",
+      "suggested_target": "products/compliance/backend/src/services/inspections/InspectionTimelineCard.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:inspection",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/JurisdictionCoverageBadge.tsx",
+      "area": "policy_coverage",
+      "suggested_target": "products/compliance/backend/src/services/policy_coverage/JurisdictionCoverageBadge.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:coverage",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyJurisdictionRulesPanel.tsx",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "frontend"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "area": "frontend_components",
+      "suggested_target": "products/compliance/frontend/src/components/CompliancePane.tsx",
+      "confidence": "medium",
+      "reason": "matched_keyword:Compliance",
+      "lane": "frontend"
+    }
+  ],
+  "next_steps": [
+    "Move backend compliance lanes in small batches by area",
+    "Validate imports after each area",
+    "Move frontend compliance files after backend areas stabilize",
+    "Handle manual_review items last"
+  ]
+}

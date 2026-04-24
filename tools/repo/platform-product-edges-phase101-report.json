@@ -1,0 +1,34 @@
+{
+  "phase": 101,
+  "summary": {
+    "platform_to_product_edges_excluding_adapters": 1,
+    "files": 1,
+    "target_owners": {
+      "intelligence": 1
+    },
+    "unique_modules": 1
+  },
+  "top_modules": [
+    {
+      "module": "products.intelligence.backend.src.services.rent_refresh_queue_service",
+      "count": 1
+    }
+  ],
+  "files": [
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "imports": [
+        "products.intelligence.backend.src.services.rent_refresh_queue_service"
+      ],
+      "count": 1
+    }
+  ],
+  "edges": [
+    {
+      "file": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "from_owner": "platform",
+      "to_owner": "intelligence",
+      "module": "products.intelligence.backend.src.services.rent_refresh_queue_service"
+    }
+  ]
+}

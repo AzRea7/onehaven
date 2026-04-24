@@ -8,22 +8,22 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.domain.compliance.checklist_templates import (
+from products.compliance.backend.src.domain.inspection.checklist_templates import (
     ChecklistTemplateItem,
     template_items_from_effective_rules,
     template_lookup,
 )
-from app.domain.compliance.hqs_library import get_effective_hqs_items
-from app.domain.compliance.inspection_mapping import map_raw_form_answers
-from app.domain.compliance.inspection_rules import score_readiness
-from app.models import (
+from products.compliance.backend.src.domain.inspection.hqs_library import get_effective_hqs_items
+from products.compliance.backend.src.domain.inspection.inspection_mapping import map_raw_form_answers
+from products.compliance.backend.src.domain.inspection.inspection_rules import score_readiness
+from onehaven_platform.backend.src.models import (
     Inspection,
     InspectionItem,
     Property,
     PropertyChecklist,
     PropertyChecklistItem,
 )
-from app.services.jurisdiction_profile_service import resolve_operational_policy
+from products.compliance.backend.src.services.jurisdiction_profile_service import resolve_operational_policy
 
 
 def _now() -> datetime:

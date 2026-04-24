@@ -1,0 +1,130 @@
+{
+  "phase": 43,
+  "priority": "medium",
+  "group_count": 5,
+  "groups": [
+    {
+      "prefix": "onehaven_decision_engine/backend/app/services",
+      "count": 81,
+      "priority_mix": {
+        "medium": 81
+      },
+      "owner_mix": {
+        "platform": 9,
+        "unclear": 53,
+        "acquire": 1,
+        "compliance": 13,
+        "ops": 1,
+        "intelligence": 4
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/services/address_normalization.py",
+        "onehaven_decision_engine/backend/app/services/agent_actions.py",
+        "onehaven_decision_engine/backend/app/services/agent_concurrency.py",
+        "onehaven_decision_engine/backend/app/services/agent_engine.py",
+        "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+        "onehaven_decision_engine/backend/app/services/agent_orchestrator_runtime.py",
+        "onehaven_decision_engine/backend/app/services/agent_threads.py",
+        "onehaven_decision_engine/backend/app/services/agent_trace.py",
+        "onehaven_decision_engine/backend/app/services/auth_service.py",
+        "onehaven_decision_engine/backend/app/services/budget_service.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/domain",
+      "count": 58,
+      "priority_mix": {
+        "medium": 58
+      },
+      "owner_mix": {
+        "unclear": 30,
+        "compliance": 3,
+        "intelligence": 7,
+        "platform": 12,
+        "acquire": 4,
+        "ops": 2
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/domain/audit.py",
+        "onehaven_decision_engine/backend/app/domain/cashflow.py",
+        "onehaven_decision_engine/backend/app/domain/compliance.py",
+        "onehaven_decision_engine/backend/app/domain/decision_engine.py",
+        "onehaven_decision_engine/backend/app/domain/events.py",
+        "onehaven_decision_engine/backend/app/domain/fingerprint.py",
+        "onehaven_decision_engine/backend/app/domain/jurisdiction_scoring.py",
+        "onehaven_decision_engine/backend/app/domain/operating_truth.py",
+        "onehaven_decision_engine/backend/app/domain/operating_truth_enforcement.py",
+        "onehaven_decision_engine/backend/app/domain/rent_explain_runs.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src/components",
+      "count": 32,
+      "priority_mix": {
+        "medium": 32
+      },
+      "owner_mix": {
+        "frontend_component": 31,
+        "ops": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+        "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+        "onehaven_decision_engine/frontend/src/components/Artwork.tsx"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src/pages",
+      "count": 11,
+      "priority_mix": {
+        "medium": 11
+      },
+      "owner_mix": {
+        "frontend_page": 8,
+        "acquire": 1,
+        "compliance": 2
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+        "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+        "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+        "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+        "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Register.tsx"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/products",
+      "count": 9,
+      "priority_mix": {
+        "low": 1,
+        "medium": 8
+      },
+      "owner_mix": {
+        "compliance": 9
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/products/compliance/__init__.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/compliance_photo_analysis_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/__init__.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__init__.py"
+      ]
+    }
+  ]
+}

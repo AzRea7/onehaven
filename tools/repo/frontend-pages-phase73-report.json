@@ -1,0 +1,81 @@
+{
+  "phase": 73,
+  "dry_run": false,
+  "summary": {
+    "would_move": 0,
+    "moved": 7,
+    "skipped": 3
+  },
+  "results": [
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Agents.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/AgentsPanel.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Constitution.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "target": "products/acquire/frontend/src/pages/ImportsPage.tsx",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+      "target": "products/compliance/frontend/src/pages/JurisdictionProfiles.tsx",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+      "target": "products/compliance/frontend/src/pages/Jurisdictions.tsx",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Login.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "target": "products/compliance/frontend/src/pages/PolicyReview.tsx",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "target": "products/ops/frontend/src/pages/Property.tsx",
+      "owner": "ops",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Register.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Register.tsx",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ]
+}

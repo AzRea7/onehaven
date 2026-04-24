@@ -6,9 +6,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal
-from app.db import get_db
-from app.policy_models import PolicyAssertion, PolicySource
+from onehaven_platform.backend.src.auth import get_principal
+from onehaven_platform.backend.src.db import get_db
+from onehaven_platform.backend.src.policy_models import PolicyAssertion, PolicySource
 
 router = APIRouter(prefix="/policy-evidence", tags=["policy-evidence"])
 
@@ -50,9 +50,9 @@ def evidence_for_market(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_evidence_service import evidence_for_market as _svc_evidence_for_market
-    from app.products.compliance.services.policy_sources.dataset_service import dataset_snapshot_for_market as _svc_dataset_snapshot_for_market
-    from app.services.policy_evidence_version_service import evidence_versions_for_market as _svc_versions_for_market
+    from products.compliance.backend.src.services.policy_evidence_service import evidence_for_market as _svc_evidence_for_market
+    from products.compliance.backend.src.services.policy_sources.dataset_service import dataset_snapshot_for_market as _svc_dataset_snapshot_for_market
+    from products.compliance.backend.src.services.policy_evidence_version_service import evidence_versions_for_market as _svc_versions_for_market
 
     st = _norm_state(state) or "MI"
     cnty = _norm_lower(county)
@@ -101,7 +101,7 @@ def evidence_summary_for_market_route(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_evidence_service import evidence_summary_for_market
+    from products.compliance.backend.src.services.policy_evidence_service import evidence_summary_for_market
     return evidence_summary_for_market(
         db,
         org_id=getattr(principal, "org_id", None),
@@ -123,7 +123,7 @@ def dataset_summary_for_market_route(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.products.compliance.services.policy_sources.dataset_service import dataset_snapshot_for_market
+    from products.compliance.backend.src.services.policy_sources.dataset_service import dataset_snapshot_for_market
     return dataset_snapshot_for_market(
         db,
         org_id=getattr(principal, "org_id", None),
@@ -146,7 +146,7 @@ def evidence_versions_for_market_route(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_evidence_version_service import evidence_versions_for_market
+    from products.compliance.backend.src.services.policy_evidence_version_service import evidence_versions_for_market
     return evidence_versions_for_market(
         db,
         org_id=getattr(principal, "org_id", None),

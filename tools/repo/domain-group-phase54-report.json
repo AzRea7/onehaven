@@ -1,0 +1,785 @@
+{
+  "phase": 54,
+  "dry_run": false,
+  "rule_count": 184,
+  "rewrite_file_count": 51,
+  "rewrites": [
+    {
+      "file": "onehaven_decision_engine/backend/tests/test_compliance_template_version_immutable.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/test_section8_rent_rules.py",
+      "replacements": [
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/operating_truth_enforcement.py",
+      "replacements": [
+        {
+          "rule": "app.domain.operating_truth",
+          "pattern": "\\bapp\\.domain\\.operating_truth\\b",
+          "replacement": "onehaven_platform.backend.src.domain.operating_truth",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/imports.py",
+      "replacements": [
+        {
+          "rule": "app.domain.fingerprint",
+          "pattern": "\\bapp\\.domain\\.fingerprint\\b",
+          "replacement": "onehaven_platform.backend.src.domain.fingerprint",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.importers.investorlift",
+          "pattern": "\\bapp\\.domain\\.importers\\.investorlift\\b",
+          "replacement": "products.intelligence.backend.src.domain.importers.investorlift",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.importers.zillow",
+          "pattern": "\\bapp\\.domain\\.importers\\.zillow\\b",
+          "replacement": "products.intelligence.backend.src.domain.importers.zillow",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.operating_truth",
+          "pattern": "\\bapp\\.domain\\.operating_truth\\b",
+          "replacement": "onehaven_platform.backend.src.domain.operating_truth",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.events",
+          "pattern": "\\bapp\\.domain\\.events\\b",
+          "replacement": "onehaven_platform.backend.src.domain.events",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/rent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.events",
+          "pattern": "\\bapp\\.domain\\.events\\b",
+          "replacement": "onehaven_platform.backend.src.domain.events",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.rent_learning",
+          "pattern": "\\bapp\\.domain\\.rent_learning\\b",
+          "replacement": "products.intelligence.backend.src.domain.rent_learning",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/registry.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.rent_learning",
+          "pattern": "\\bapp\\.domain\\.rent_learning\\b",
+          "replacement": "products.intelligence.backend.src.domain.rent_learning",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/impl/underwrite_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_photo_analysis_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.photo_to_hqs_mapper",
+          "pattern": "\\bapp\\.domain\\.compliance\\.photo_to_hqs_mapper\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.photo_to_hqs_mapper",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/tests/steps/step_12_compliance_automation/test_hqs_library_step12.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/operating_truth_enforcement.py",
+      "replacements": [
+        {
+          "rule": "app.domain.operating_truth",
+          "pattern": "\\bapp\\.domain\\.operating_truth\\b",
+          "replacement": "onehaven_platform.backend.src.domain.operating_truth",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/agents/registry.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/agents/impl/hqs_precheck_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/agents/impl/rent_reasonableness_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.rent_learning",
+          "pattern": "\\bapp\\.domain\\.rent_learning\\b",
+          "replacement": "products.intelligence.backend.src.domain.rent_learning",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/domain/agents/impl/underwrite_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/backend/src/routers/imports.py",
+      "replacements": [
+        {
+          "rule": "app.domain.fingerprint",
+          "pattern": "\\bapp\\.domain\\.fingerprint\\b",
+          "replacement": "onehaven_platform.backend.src.domain.fingerprint",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.importers.investorlift",
+          "pattern": "\\bapp\\.domain\\.importers\\.investorlift\\b",
+          "replacement": "products.intelligence.backend.src.domain.importers.investorlift",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.importers.zillow",
+          "pattern": "\\bapp\\.domain\\.importers\\.zillow\\b",
+          "replacement": "products.intelligence.backend.src.domain.importers.zillow",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.operating_truth",
+          "pattern": "\\bapp\\.domain\\.operating_truth\\b",
+          "replacement": "onehaven_platform.backend.src.domain.operating_truth",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/domain/hqs_precheck_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.compliance_completion",
+          "pattern": "\\bapp\\.domain\\.compliance\\.compliance_completion\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.compliance_completion",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/imports.py",
+      "replacements": [
+        {
+          "rule": "app.domain.fingerprint",
+          "pattern": "\\bapp\\.domain\\.fingerprint\\b",
+          "replacement": "onehaven_platform.backend.src.domain.fingerprint",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.importers.investorlift",
+          "pattern": "\\bapp\\.domain\\.importers\\.investorlift\\b",
+          "replacement": "products.intelligence.backend.src.domain.importers.investorlift",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.importers.zillow",
+          "pattern": "\\bapp\\.domain\\.importers\\.zillow\\b",
+          "replacement": "products.intelligence.backend.src.domain.importers.zillow",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.operating_truth",
+          "pattern": "\\bapp\\.domain\\.operating_truth\\b",
+          "replacement": "onehaven_platform.backend.src.domain.operating_truth",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.inspection_mapping",
+          "pattern": "\\bapp\\.domain\\.compliance\\.inspection_mapping\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.inspection_mapping",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance",
+          "pattern": "\\bapp\\.domain\\.compliance\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rehab.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.events",
+          "pattern": "\\bapp\\.domain\\.events\\b",
+          "replacement": "onehaven_platform.backend.src.domain.events",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.events",
+          "pattern": "\\bapp\\.domain\\.events\\b",
+          "replacement": "onehaven_platform.backend.src.domain.events",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.rent_learning",
+          "pattern": "\\bapp\\.domain\\.rent_learning\\b",
+          "replacement": "products.intelligence.backend.src.domain.rent_learning",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/rent_enrich.py",
+      "replacements": [
+        {
+          "rule": "app.domain.rent_learning",
+          "pattern": "\\bapp\\.domain\\.rent_learning\\b",
+          "replacement": "products.intelligence.backend.src.domain.rent_learning",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_photo_analysis_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.photo_to_hqs_mapper",
+          "pattern": "\\bapp\\.domain\\.compliance\\.photo_to_hqs_mapper\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.photo_to_hqs_mapper",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/failure_task_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.inspection_mapping",
+          "pattern": "\\bapp\\.domain\\.compliance\\.inspection_mapping\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.inspection_mapping",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.top_fail_points",
+          "pattern": "\\bapp\\.domain\\.compliance\\.top_fail_points\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.top_fail_points",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/hqs_precheck_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/inspections.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.inspection_mapping",
+          "pattern": "\\bapp\\.domain\\.compliance\\.inspection_mapping\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.inspection_mapping",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance",
+          "pattern": "\\bapp\\.domain\\.compliance\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.hqs",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.inspection_rules",
+          "pattern": "\\bapp\\.domain\\.compliance\\.inspection_rules\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.inspection_rules",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/template_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.checklist_templates",
+          "pattern": "\\bapp\\.domain\\.compliance\\.checklist_templates\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.checklist_templates",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.hqs_library",
+          "pattern": "\\bapp\\.domain\\.compliance\\.hqs_library\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.hqs_library",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.inspection_mapping",
+          "pattern": "\\bapp\\.domain\\.compliance\\.inspection_mapping\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.inspection_mapping",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.compliance.inspection_rules",
+          "pattern": "\\bapp\\.domain\\.compliance\\.inspection_rules\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.inspection_rules",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.jurisdiction_scoring",
+          "pattern": "\\bapp\\.domain\\.jurisdiction_scoring\\b",
+          "replacement": "products.compliance.backend.src.domain.jurisdiction_scoring",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/rules_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/domain/underwrite_agent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.operating_truth_enforcement",
+          "pattern": "\\bapp\\.domain\\.operating_truth_enforcement\\b",
+          "replacement": "onehaven_platform.backend.src.domain.operating_truth_enforcement",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/evaluate.py",
+      "replacements": [
+        {
+          "rule": "app.domain.decision_engine",
+          "pattern": "\\bapp\\.domain\\.decision_engine\\b",
+          "replacement": "products.intelligence.backend.src.domain.decision_engine",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.events",
+          "pattern": "\\bapp\\.domain\\.events\\b",
+          "replacement": "onehaven_platform.backend.src.domain.events",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.jurisdiction_scoring",
+          "pattern": "\\bapp\\.domain\\.jurisdiction_scoring\\b",
+          "replacement": "products.compliance.backend.src.domain.jurisdiction_scoring",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent.py",
+      "replacements": [
+        {
+          "rule": "app.domain.events",
+          "pattern": "\\bapp\\.domain\\.events\\b",
+          "replacement": "onehaven_platform.backend.src.domain.events",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.rent_learning",
+          "pattern": "\\bapp\\.domain\\.rent_learning\\b",
+          "replacement": "products.intelligence.backend.src.domain.rent_learning",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/rent_enrich.py",
+      "replacements": [
+        {
+          "rule": "app.domain.rent_learning",
+          "pattern": "\\bapp\\.domain\\.rent_learning\\b",
+          "replacement": "products.intelligence.backend.src.domain.rent_learning",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "replacements": [
+        {
+          "rule": "app.domain.jurisdiction_scoring",
+          "pattern": "\\bapp\\.domain\\.jurisdiction_scoring\\b",
+          "replacement": "products.compliance.backend.src.domain.jurisdiction_scoring",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.rent_learning",
+          "pattern": "\\bapp\\.domain\\.rent_learning\\b",
+          "replacement": "products.intelligence.backend.src.domain.rent_learning",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/rehab.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        },
+        {
+          "rule": "app.domain.events",
+          "pattern": "\\bapp\\.domain\\.events\\b",
+          "replacement": "onehaven_platform.backend.src.domain.events",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "app.domain.underwriting",
+          "pattern": "\\bapp\\.domain\\.underwriting\\b",
+          "replacement": "products.intelligence.backend.src.domain.underwriting",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/state_machine.py",
+      "replacements": [
+        {
+          "rule": "app.domain.compliance.compliance_completion",
+          "pattern": "\\bapp\\.domain\\.compliance\\.compliance_completion\\b",
+          "replacement": "products.compliance.backend.src.domain.compliance.compliance_completion",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "replacements": [
+        {
+          "rule": "app.domain.audit",
+          "pattern": "\\bapp\\.domain\\.audit\\b",
+          "replacement": "onehaven_platform.backend.src.domain.audit",
+          "count": "1"
+        }
+      ]
+    }
+  ]
+}

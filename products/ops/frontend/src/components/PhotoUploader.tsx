@@ -1,8 +1,8 @@
 import React from "react";
 import { Upload, Loader2, Camera, FilePlus2, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
-import Surface from "@/components/Surface";
-import AppSelect from "@/components/AppSelect";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
+import AppSelect from "packages/ui/onehaven_onehaven_platform/frontend/src/components/AppSelect";
 
 type Props = {
   propertyId: number;

@@ -9,9 +9,9 @@ from typing import Any, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent
-from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource, PropertyComplianceProjection
-from app.products.compliance.services.policy_coverage.completeness_service import profile_completeness_payload
+from onehaven_platform.backend.src.models import AuditEvent
+from onehaven_platform.backend.src.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource, PropertyComplianceProjection
+from products.compliance.backend.src.services.policy_coverage.completeness_service import profile_completeness_payload
 
 
 NOTIFICATION_ENTITY_TYPE = "jurisdiction_profile"

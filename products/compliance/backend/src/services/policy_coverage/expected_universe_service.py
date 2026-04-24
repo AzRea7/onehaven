@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any
 
-from app.domain.policy.expected_universe import (
+from onehaven_platform.backend.src.domain.policy.expected_universe import (
     PolicyExpectedUniverse,
     build_policy_expected_universe,
 )

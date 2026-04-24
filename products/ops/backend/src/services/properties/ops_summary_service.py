@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Inspection, Lease, Property, Task, Unit
+from onehaven_platform.backend.src.models import Inspection, Lease, Property, Task, Unit
 
 
 def _normalize_status(value: Any) -> str:

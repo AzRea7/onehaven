@@ -1,0 +1,31 @@
+{
+  "phase": 21,
+  "product": "tenants",
+  "dry_run": false,
+  "phase20_legacy_hit_count_before": 2,
+  "rewrite_file_count": 2,
+  "rewrites": [
+    {
+      "file": "apps/suite-web/src/app/App.tsx",
+      "replacements": [
+        {
+          "rule": "legacy_frontend_alias",
+          "pattern": "([\"\\'])@/products/tenant/",
+          "replacement": "\\1products/tenants/frontend/src/",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/App.tsx",
+      "replacements": [
+        {
+          "rule": "legacy_frontend_alias",
+          "pattern": "([\"\\'])@/products/tenant/",
+          "replacement": "\\1products/tenants/frontend/src/",
+          "count": "1"
+        }
+      ]
+    }
+  ]
+}

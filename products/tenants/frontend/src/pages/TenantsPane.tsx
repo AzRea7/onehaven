@@ -1,10 +1,10 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, ArrowRight, RefreshCcw, Users } from "lucide-react";
-import PageShell from "@/components/PageShell";
-import PageHero from "@/components/PageHero";
-import Surface from "@/components/Surface";
-import EmptyState from "@/components/EmptyState";
+import PageShell from "onehaven_onehaven_platform/frontend/src/shell/PageShell";
+import PageHero from "onehaven_onehaven_platform/frontend/src/shell/PageHero";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
+import EmptyState from "packages/ui/onehaven_onehaven_platform/frontend/src/components/EmptyState";
 import { api } from "@/lib/api";
 
 type TenantRow = {

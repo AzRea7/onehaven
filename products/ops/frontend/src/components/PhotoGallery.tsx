@@ -1,7 +1,7 @@
 import React from "react";
 import { Camera, Image as ImageIcon, Trash2 } from "lucide-react";
-import Surface from "@/components/Surface";
-import EmptyState from "@/components/EmptyState";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
+import EmptyState from "packages/ui/onehaven_onehaven_platform/frontend/src/components/EmptyState";
 
 type Photo = {
   id: number;

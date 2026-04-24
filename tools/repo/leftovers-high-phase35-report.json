@@ -1,0 +1,29 @@
+{
+  "phase": 35,
+  "priority": "high",
+  "group_count": 1,
+  "groups": [
+    {
+      "prefix": "backend/app/routers",
+      "count": 13,
+      "sample_sources": [
+        "backend/app/routers/agent_runs.py",
+        "backend/app/routers/agents.py",
+        "backend/app/routers/automation.py",
+        "backend/app/routers/geo.py",
+        "backend/app/routers/imports.py",
+        "backend/app/routers/imports_alias.py",
+        "backend/app/routers/ingestion.py",
+        "backend/app/routers/meta.py",
+        "backend/app/routers/rehab.py",
+        "backend/app/routers/rent.py"
+      ],
+      "priority_mix": {
+        "high": 13
+      },
+      "sections": {
+        "backend_unclear": 13
+      }
+    }
+  ]
+}

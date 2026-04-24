@@ -10,9 +10,9 @@ from typing import Any, Iterable
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.domain.compliance.inspection_mapping import map_inspection_code
-from app.domain.compliance.top_fail_points import top_fail_points
-from app.models import Inspection, InspectionItem, Property, RehabTask
+from products.compliance.backend.src.domain.inspection.inspection_mapping import map_inspection_code
+from products.compliance.backend.src.domain.inspection.top_fail_points import top_fail_points
+from onehaven_platform.backend.src.models import Inspection, InspectionItem, Property, RehabTask
 
 
 def _now() -> datetime:
@@ -433,7 +433,7 @@ def create_tasks_from_photo_findings(
 
 
 def create_proof_gap_tasks_from_projection(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    from app.products.compliance.services.compliance_engine.projection_service import build_property_projection_snapshot
+    from onehaven_platform.backend.src.services.compliance_projection_service import build_property_projection_snapshot
 
     snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
     obligations = list(snapshot.get("proof_obligations") or ((snapshot.get("projection") or {}).get("proof_obligations") if isinstance(snapshot.get("projection"), dict) else []) or [])

@@ -6,12 +6,12 @@ import {
   Eye,
   RefreshCcw,
 } from "lucide-react";
-import PageShell from "@/components/PageShell";
-import PageHero from "@/components/PageHero";
-import Surface from "@/components/Surface";
-import EmptyState from "@/components/EmptyState";
-import PropertyJurisdictionRulesPanel from "@/products/compliance/components/PropertyJurisdictionRulesPanel";
-import JurisdictionCoverageBadge from "@/products/compliance/components/JurisdictionCoverageBadge";
+import PageShell from "onehaven_onehaven_platform/frontend/src/shell/PageShell";
+import PageHero from "onehaven_onehaven_platform/frontend/src/shell/PageHero";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
+import EmptyState from "packages/ui/onehaven_onehaven_platform/frontend/src/components/EmptyState";
+import PropertyJurisdictionRulesPanel from "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel";
+import JurisdictionCoverageBadge from "products/compliance/frontend/src/components/JurisdictionCoverageBadge";
 import { api } from "@/lib/api";
 
 type ComplianceRow = {

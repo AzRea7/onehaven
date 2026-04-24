@@ -1,0 +1,106 @@
+{
+  "phase": 20,
+  "product": "compliance",
+  "legacy_hit_count": 16,
+  "legacy_hits": [
+    {
+      "file": "apps/suite-web/src/app/App.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/App.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 5
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 18
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 20
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyJurisdictionRulesPanel.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 14
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 13
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 18
+    },
+    {
+      "file": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 19
+    },
+    {
+      "file": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 20
+    },
+    {
+      "file": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 13
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/JurisdictionProfiles.tsx",
+      "type": "legacy_frontend_alias",
+      "match": "\"@/products/compliance/",
+      "line": 5
+    }
+  ],
+  "legacy_frontend_dir_exists": true,
+  "new_frontend_dir_exists": true,
+  "status": "needs_attention"
+}

@@ -1,0 +1,26 @@
+{
+  "phase": 29,
+  "area": "pages",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 2,
+  "would_move_count": 0,
+  "moved_count": 1,
+  "skipped_count": 1,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "target": "products/compliance/frontend/src/pages/PropertyCompliancePanel.tsx",
+      "area": "pages",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "target": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "area": "pages",
+      "status": "skipped",
+      "reason": "target_exists"
+    }
+  ]
+}

@@ -1,0 +1,502 @@
+{
+  "phase": 48,
+  "dry_run": false,
+  "remove_legacy": false,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/services/address_normalization.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/address_normalization.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_actions.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_actions.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_concurrency.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_concurrency.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_engine.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_engine.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_orchestrator.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator_runtime.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_orchestrator_runtime.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_threads.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_threads.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_trace.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_trace.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/auth_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/auth_service.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/budget_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/budget_service.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/crime_index.py",
+      "target": "products/intelligence/backend/src/services/crime_index.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/csv_import_mapping_service.py",
+      "target": "products/acquire/backend/src/services/csv_import_mapping_service.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/events_facade.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/events_facade.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/external_budget.py",
+      "target": "products/intelligence/backend/src/services/external_budget.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/fmr.py",
+      "target": "products/intelligence/backend/src/services/fmr.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocode_cache_service.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocoding_service.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/hud_fmr_service.py",
+      "target": "products/intelligence/backend/src/services/hud_fmr_service.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_dedupe_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_dedupe_service.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_enrichment_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_execute.py",
+      "target": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_run_service.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_scheduler_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_source_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_source_service.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspection_scheduling_service.py",
+      "target": "products/compliance/backend/src/services/inspection_scheduling_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspector_communication_service.py",
+      "target": "products/compliance/backend/src/services/inspector_communication_service.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_profile_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_registry_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_registry_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_source_family_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_source_family_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_task_mapper.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_task_mapper.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/lease_rules.py",
+      "target": "products/tenants/backend/src/services/lease_rules.py",
+      "owner": "tenants",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/locks_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/locks_service.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_catalog_service.py",
+      "target": "products/intelligence/backend/src/services/market_catalog_service.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_sync_service.py",
+      "target": "products/intelligence/backend/src/services/market_sync_service.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/offender_index.py",
+      "target": "products/intelligence/backend/src/services/offender_index.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/onboarding_flows.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/onboarding_flows.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ownership.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/ownership.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/pane_routing_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/pane_routing_service.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/photo_rehab_agent.py",
+      "target": "products/ops/backend/src/services/photo_rehab_agent.py",
+      "owner": "ops",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/plan_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/plan_service.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_catalog.py",
+      "target": "products/compliance/backend/src/services/policy_catalog.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_change_detection_service.py",
+      "target": "products/compliance/backend/src/services/policy_change_detection_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_crawl_service.py",
+      "target": "products/compliance/backend/src/services/policy_crawl_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_service.py",
+      "target": "products/compliance/backend/src/services/policy_evidence_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_version_service.py",
+      "target": "products/compliance/backend/src/services/policy_evidence_version_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_market_seed_service.py",
+      "target": "products/compliance/backend/src/services/policy_market_seed_service.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_rule_normalizer.py",
+      "target": "products/compliance/backend/src/services/policy_rule_normalizer.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_seed.py",
+      "target": "products/compliance/backend/src/services/policy_seed.py",
+      "owner": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_ingestion_service.py",
+      "target": "products/acquire/backend/src/services/portfolio_ingestion_service.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_watchlist_service.py",
+      "target": "products/intelligence/backend/src/services/portfolio_watchlist_service.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_ingestion_router_service.py",
+      "target": "products/acquire/backend/src/services/product_ingestion_router_service.py",
+      "owner": "acquire",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_surfaces.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/product_surfaces.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_insurance_enrichment_service.py",
+      "target": "products/intelligence/backend/src/services/property_insurance_enrichment_service.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_normalization_service.py",
+      "target": null,
+      "owner": "manual_review",
+      "status": "skipped",
+      "reason": "manual_review"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_photo_service.py",
+      "target": "products/ops/backend/src/services/property_photo_service.py",
+      "owner": "ops",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_price_resolution_service.py",
+      "target": "products/intelligence/backend/src/services/property_price_resolution_service.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_tax_enrichment_service.py",
+      "target": "products/intelligence/backend/src/services/property_tax_enrichment_service.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/public_tax_lookup_service.py",
+      "target": "products/intelligence/backend/src/services/public_tax_lookup_service.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_comp_selection.py",
+      "target": "products/intelligence/backend/src/services/rent_comp_selection.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_refresh_queue_service.py",
+      "target": "products/intelligence/backend/src/services/rent_refresh_queue_service.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_listing_source.py",
+      "target": "products/intelligence/backend/src/services/rentcast_listing_source.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_service.py",
+      "target": "products/intelligence/backend/src/services/rentcast_service.py",
+      "owner": "intelligence",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/runtime_metrics.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/runtime_metrics.py",
+      "owner": "platform",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "target": "products/ops/backend/src/services/stage_guard.py",
+      "owner": "ops",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/trust_service.py",
+      "target": "products/compliance/backend/src/services/trust_service.py",
+      "owner": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/usage_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/usage_service.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/virus_scanning_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/virus_scanning_service.py",
+      "owner": "platform",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/zillow_api_source.py",
+      "target": "products/intelligence/backend/src/services/zillow_api_source.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/zillow_photo_source.py",
+      "target": "products/intelligence/backend/src/services/zillow_photo_source.py",
+      "owner": "intelligence",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ],
+  "summary": {
+    "would_move": 0,
+    "moved": 36,
+    "skipped": 34
+  }
+}

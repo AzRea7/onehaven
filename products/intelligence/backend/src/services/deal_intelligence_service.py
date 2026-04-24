@@ -5,8 +5,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Deal, Property, UnderwritingResult
-from app.products.compliance.services.compliance_engine.brief_service import build_property_compliance_brief_summary
+from onehaven_platform.backend.src.models import Deal, Property, UnderwritingResult
+from products.compliance.backend.src.services.compliance_engine.brief_service import build_property_compliance_brief_summary
 
 
 def _label_from_score(score: float) -> str:

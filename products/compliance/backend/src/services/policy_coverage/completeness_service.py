@@ -9,7 +9,7 @@ from typing import Any, Iterable, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import (
+from onehaven_platform.backend.src.domain.policy.categories import (
     CATEGORY_UNCATEGORIZED,
     JurisdictionExpectedRuleUniverse,
     JurisdictionTierCoverage,
@@ -22,24 +22,24 @@ from app.domain.policy.categories import (
     normalize_category,
     normalize_rule_category,
 )
-from app.domain.policy.defaults import (
+from onehaven_platform.backend.src.domain.policy.defaults import (
     DEFAULT_STALE_DAYS,
     completeness_score_weights,
     completeness_scoring_thresholds,
     merged_hard_trust_defaults,
     required_categories_for_city,
 )
-from app.domain.jurisdiction_scoring import (
+from onehaven_platform.backend.src.services.jurisdiction_scoring_service import (
     JurisdictionCompleteness,
     compute_category_completeness,
 )
-from app.policy_models import (
+from onehaven_platform.backend.src.policy_models import (
     JurisdictionCoverageStatus,
     JurisdictionProfile,
     PolicyAssertion,
     PolicySource,
 )
-from app.services.jurisdiction_profile_service import _loads, _dumps, merge_profile_policy_meta
+from products.compliance.backend.src.services.jurisdiction_profile_service import _loads, _dumps, merge_profile_policy_meta
 
 
 
@@ -681,7 +681,7 @@ def _category_freshness_snapshot(
 ) -> dict[str, Any]:
     category = normalize_category(category) or str(category or '').strip().lower()
     try:
-        from app.products.compliance.services.policy_coverage.sla_service import (
+        from products.compliance.backend.src.services.policy_coverage.sla_service import (
             category_stale_kind_for_source,
             source_category_due_at,
             source_category_is_past_sla,

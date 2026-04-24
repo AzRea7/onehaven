@@ -1,0 +1,206 @@
+{
+  "phase": 39,
+  "top": 10,
+  "group_count": 10,
+  "groups": [
+    {
+      "prefix": "onehaven_decision_engine/backend/app",
+      "count": 94,
+      "medium_count": 94,
+      "sections": {
+        "compliance_manual_review": 94
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/domain/__init__.py",
+        "onehaven_decision_engine/backend/app/domain/agents/apply.py",
+        "onehaven_decision_engine/backend/app/domain/agents/contracts.py",
+        "onehaven_decision_engine/backend/app/domain/agents/executor.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/deal_intake.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/next_actions_agent.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/ops_judge.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/packet_builder_agent.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/public_records_check.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/services",
+      "count": 60,
+      "medium_count": 60,
+      "sections": {
+        "compliance_manual_review": 60
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/services/address_normalization.py",
+        "onehaven_decision_engine/backend/app/services/agent_actions.py",
+        "onehaven_decision_engine/backend/app/services/agent_concurrency.py",
+        "onehaven_decision_engine/backend/app/services/agent_engine.py",
+        "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+        "onehaven_decision_engine/backend/app/services/agent_orchestrator_runtime.py",
+        "onehaven_decision_engine/backend/app/services/agent_threads.py",
+        "onehaven_decision_engine/backend/app/services/agent_trace.py",
+        "onehaven_decision_engine/backend/app/services/auth_service.py",
+        "onehaven_decision_engine/backend/app/services/budget_service.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src",
+      "count": 36,
+      "medium_count": 36,
+      "sections": {
+        "compliance_manual_review": 36
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+        "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+        "onehaven_decision_engine/frontend/src/components/Artwork.tsx"
+      ]
+    },
+    {
+      "prefix": "backend/app/services",
+      "count": 34,
+      "medium_count": 34,
+      "sections": {
+        "backend_manual_split": 4,
+        "backend_unclear": 30
+      },
+      "sample_sources": [
+        "backend/app/services/inspector_communication_service.py",
+        "backend/app/services/jurisdiction_task_mapper.py",
+        "backend/app/services/policy_catalog.py",
+        "backend/app/services/stage_guard.py",
+        "backend/app/services/address_normalization.py",
+        "backend/app/services/agent_actions.py",
+        "backend/app/services/agent_concurrency.py",
+        "backend/app/services/agent_engine.py",
+        "backend/app/services/agent_orchestrator.py",
+        "backend/app/services/agent_orchestrator_runtime.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/domain",
+      "count": 34,
+      "medium_count": 34,
+      "sections": {
+        "compliance_manual_review": 34
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/domain/__init__.py",
+        "onehaven_decision_engine/backend/app/domain/agents/apply.py",
+        "onehaven_decision_engine/backend/app/domain/agents/contracts.py",
+        "onehaven_decision_engine/backend/app/domain/agents/executor.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/deal_intake.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/next_actions_agent.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/ops_judge.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/packet_builder_agent.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/public_records_check.py",
+        "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src/components",
+      "count": 29,
+      "medium_count": 29,
+      "sections": {
+        "compliance_manual_review": 29
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+        "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+        "onehaven_decision_engine/frontend/src/components/Artwork.tsx"
+      ]
+    },
+    {
+      "prefix": "backend/app/domain",
+      "count": 24,
+      "medium_count": 24,
+      "sections": {
+        "backend_manual_split": 2,
+        "backend_unclear": 22
+      },
+      "sample_sources": [
+        "backend/app/domain/compliance/photo_to_hqs_mapper.py",
+        "backend/app/domain/policy/authority.py",
+        "backend/app/domain/__init__.py",
+        "backend/app/domain/agents/apply.py",
+        "backend/app/domain/agents/contracts.py",
+        "backend/app/domain/agents/executor.py",
+        "backend/app/domain/agents/impl/packet_builder_agent.py",
+        "backend/app/domain/agents/impl/public_records_check.py",
+        "backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+        "backend/app/domain/agents/impl/timeline_nudger.py"
+      ]
+    },
+    {
+      "prefix": "backend/app/domain/agents",
+      "count": 11,
+      "medium_count": 11,
+      "sections": {
+        "backend_unclear": 11
+      },
+      "sample_sources": [
+        "backend/app/domain/agents/apply.py",
+        "backend/app/domain/agents/contracts.py",
+        "backend/app/domain/agents/executor.py",
+        "backend/app/domain/agents/impl/packet_builder_agent.py",
+        "backend/app/domain/agents/impl/public_records_check.py",
+        "backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+        "backend/app/domain/agents/impl/timeline_nudger.py",
+        "backend/app/domain/agents/llm_router.py",
+        "backend/app/domain/agents/registry.py",
+        "backend/app/domain/agents/run_service.py"
+      ]
+    },
+    {
+      "prefix": "frontend/src/components",
+      "count": 10,
+      "medium_count": 10,
+      "sections": {
+        "frontend_unclear": 10
+      },
+      "sample_sources": [
+        "frontend/src/components/AgentRunCompare.tsx",
+        "frontend/src/components/AgentRunHistory.tsx",
+        "frontend/src/components/AgentRunsPanel.tsx",
+        "frontend/src/components/AgentSlots.tsx",
+        "frontend/src/components/GlobalFilters.tsx",
+        "frontend/src/components/IngestionLaunchCard.tsx",
+        "frontend/src/components/IngestionRunsPanel.tsx",
+        "frontend/src/components/IngestionSourcesPanel.tsx",
+        "frontend/src/components/MarketSourcePackModal.tsx",
+        "frontend/src/components/RehabFromPhotosCTA.tsx"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src/pages",
+      "count": 7,
+      "medium_count": 7,
+      "sections": {
+        "compliance_manual_review": 7
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+        "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+        "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Register.tsx"
+      ]
+    }
+  ]
+}

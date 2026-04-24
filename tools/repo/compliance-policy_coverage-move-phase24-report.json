@@ -1,0 +1,75 @@
+{
+  "phase": 24,
+  "lane": "policy_coverage",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 9,
+  "would_move_count": 0,
+  "moved_count": 2,
+  "skipped_count": 7,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/expected_universe.py",
+      "target": "products/compliance/backend/src/services/policy_coverage/expected_universe.py",
+      "area": "policy_coverage",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/__init__.py",
+      "target": "products/compliance/backend/src/services/policy_coverage/__init__.py",
+      "area": "policy_coverage",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/completeness_service.py",
+      "target": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "area": "policy_coverage",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/coverage_service.py",
+      "target": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "area": "policy_coverage",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/expected_universe_service.py",
+      "target": "products/compliance/backend/src/services/policy_coverage/expected_universe_service.py",
+      "area": "policy_coverage",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/health_service.py",
+      "target": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "area": "policy_coverage",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/lockout_service.py",
+      "target": "products/compliance/backend/src/services/policy_coverage/lockout_service.py",
+      "area": "policy_coverage",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/sla_service.py",
+      "target": "products/compliance/backend/src/services/policy_coverage/sla_service.py",
+      "area": "policy_coverage",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/JurisdictionCoverageBadge.tsx",
+      "target": "products/compliance/backend/src/services/policy_coverage/JurisdictionCoverageBadge.tsx",
+      "area": "policy_coverage",
+      "status": "moved",
+      "reason": "copied_successfully"
+    }
+  ]
+}

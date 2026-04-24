@@ -1,0 +1,14 @@
+{
+  "phase": 14,
+  "product": "ops",
+  "dry_run": false,
+  "legacy_backend_dir": "onehaven_decision_engine/backend/app/products/management",
+  "new_backend_dir": "products/ops/backend/src",
+  "legacy_backend_exists_before": true,
+  "legacy_backend_file_count_before": 19,
+  "new_backend_file_count": 22,
+  "backup_path": "tools/repo/_phase14_backups/ops_20260423_133426",
+  "removed": true,
+  "status": "success",
+  "legacy_backend_exists_after": false
+}

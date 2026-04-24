@@ -9,47 +9,47 @@ from sqlalchemy import inspect, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError
 
-from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
-from app.products.compliance.services.policy_coverage.completeness_service import (
+from onehaven_platform.backend.src.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
+from products.compliance.backend.src.services.policy_coverage.completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
-from app.products.compliance.services.policy_governance.notification_service import (
+from products.compliance.backend.src.services.policy_governance.notification_service import (
     build_gap_escalation_notifications,
     build_review_queue_payload,
 )
-from app.products.compliance.services.policy_coverage.health_service import (
+from products.compliance.backend.src.services.policy_coverage.health_service import (
     get_jurisdiction_health as _chunk3_pipeline_get_jurisdiction_health,
 )
-from app.products.compliance.services.policy_governance.refresh_service import (
+from products.compliance.backend.src.services.policy_governance.refresh_service import (
     finalize_jurisdiction_profile_lifecycle as _chunk3_finalize_jurisdiction_profile_lifecycle,
 )
-from app.products.compliance.services.policy_governance.rules_service import governed_assertions_for_scope
-from app.products.compliance.services.policy_coverage.sla_service import (
+from products.compliance.backend.src.services.policy_governance.rules_service import governed_assertions_for_scope
+from products.compliance.backend.src.services.policy_coverage.sla_service import (
     build_refresh_requirements,
     collect_profile_source_sla_summary,
 )
-from app.products.compliance.services.policy_sources.catalog_admin_service import merged_catalog_for_market
-from app.services.policy_change_detection_service import summarize_refresh_runs
-from app.products.compliance.services.policy_assertions.cleanup_service import (
+from products.compliance.backend.src.services.policy_sources.catalog_admin_service import merged_catalog_for_market
+from products.compliance.backend.src.services.policy_change_detection_service import summarize_refresh_runs
+from products.compliance.backend.src.services.policy_assertions.cleanup_service import (
     ARCHIVE_MARKER,
     archive_stale_market_sources,
     cleanup_non_projectable_assertions_for_market,
 )
-from app.products.compliance.services.policy_coverage.coverage_service import (
+from products.compliance.backend.src.services.policy_coverage.coverage_service import (
     compute_coverage_status,
     upsert_coverage_status,
 )
-from app.products.compliance.services.policy_sources.discovery_service import expected_inventory_hints
-from app.products.compliance.services.policy_assertions.extractor_service import (
+from products.compliance.backend.src.services.policy_sources.discovery_service import expected_inventory_hints
+from products.compliance.backend.src.services.policy_assertions.extractor_service import (
     extract_assertions_for_source,
     mark_assertions_stale_for_source,
 )
-from app.products.compliance.services.compliance_engine.projection_service import (
+from onehaven_platform.backend.src.services.compliance_projection_service import (
     build_property_compliance_brief,
     project_verified_assertions_to_profile,
 )
-from app.products.compliance.services.policy_assertions.review_service import (
+from products.compliance.backend.src.services.policy_assertions.review_service import (
     apply_governance_lifecycle,
     auto_verify_market_assertions,
     cleanup_market_stale_assertions,
@@ -57,15 +57,15 @@ from app.products.compliance.services.policy_assertions.review_service import (
     normalize_market_assertions,
     supersede_replaced_assertions,
 )
-from app.products.compliance.services.policy_sources.source_service import (
+from products.compliance.backend.src.services.policy_sources.source_service import (
     collect_catalog_for_market,
     discover_policy_sources_for_market,
     inventory_summary_for_market,
     list_sources_for_market,
     refresh_policy_source_and_detect_changes,
 )
-from app.products.compliance.services.policy_assertions.validation_service import validate_market_assertions
-from app.products.compliance.services.policy_sources.crawl_inventory_service import sync_crawl_result_to_inventory
+from products.compliance.backend.src.services.policy_assertions.validation_service import validate_market_assertions
+from products.compliance.backend.src.services.policy_sources.crawl_inventory_service import sync_crawl_result_to_inventory
 
 
 def _norm_state(s: Optional[str]) -> str:

@@ -5,12 +5,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ComplianceProfile, Inspection, InspectionItem, Property, RehabTask
-from app.products.compliance.services.compliance_engine.recommendation_service import build_compliance_recommendation
-from app.products.compliance.services.compliance_engine.fix_plan_service import build_fix_plan
-from app.products.compliance.services.compliance_engine.inspection_risk_service import build_inspection_risk_summary
-from app.products.compliance.services.policy_coverage.health_service import get_jurisdiction_health
-from app.products.compliance.services.compliance_engine.revenue_risk_service import build_revenue_risk_summary
+from onehaven_platform.backend.src.models import ComplianceProfile, Inspection, InspectionItem, Property, RehabTask
+from products.compliance.backend.src.services.compliance_engine.recommendation_service import build_compliance_recommendation
+from products.compliance.backend.src.services.compliance_engine.fix_plan_service import build_fix_plan
+from products.compliance.backend.src.services.compliance_engine.inspection_risk_service import build_inspection_risk_summary
+from products.compliance.backend.src.services.policy_coverage.health_service import get_jurisdiction_health
+from products.compliance.backend.src.services.compliance_engine.revenue_risk_service import build_revenue_risk_summary
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:

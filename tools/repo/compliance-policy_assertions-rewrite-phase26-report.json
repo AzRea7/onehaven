@@ -1,0 +1,130 @@
+{
+  "phase": 26,
+  "lane": "policy_assertions",
+  "dry_run": false,
+  "phase25_legacy_hit_count_before": 22,
+  "rewrite_file_count": 11,
+  "rewrites": [
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "3"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/extractor_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "3"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/extractor_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "replacements": [
+        {
+          "rule": "lane_import_rewrite",
+          "pattern": "\\bapp\\.products\\.compliance\\.services\\.policy_assertions\\b",
+          "replacement": "products.compliance.backend.src.services.policy_assertions",
+          "count": "4"
+        }
+      ]
+    }
+  ]
+}

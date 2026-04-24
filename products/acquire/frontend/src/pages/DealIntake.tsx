@@ -8,8 +8,8 @@ import {
 } from "lucide-react";
 
 import { api } from "@/lib/api";
-import PageHero from "@/components/PageHero";
-import GlassCard from "@/components/GlassCard";
+import PageHero from "onehaven_onehaven_platform/frontend/src/shell/PageHero";
+import GlassCard from "packages/ui/onehaven_onehaven_platform/frontend/src/components/GlassCard";
 
 function numberOrNull(v: any) {
   const n = Number(v);

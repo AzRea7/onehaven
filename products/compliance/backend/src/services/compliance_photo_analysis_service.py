@@ -7,13 +7,13 @@ from typing import Any, Iterable
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.domain.compliance.photo_to_hqs_mapper import (
+from products.compliance.backend.src.domain.inspection.photo_to_hqs_mapper import (
     PHOTO_RULE_MAPPINGS,
     PhotoRuleMapping,
     mapping_for_rule_code,
 )
-from app.models import Inspection, Property, PropertyPhoto, RehabTask
-from app.services.property_photo_service import list_property_photos
+from onehaven_platform.backend.src.models import Inspection, Property, PropertyPhoto, RehabTask
+from onehaven_platform.backend.src.services.photo_service import list_property_photos
 
 
 def _now() -> datetime:

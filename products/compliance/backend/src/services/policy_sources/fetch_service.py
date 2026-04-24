@@ -13,7 +13,13 @@ from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+PlaywrightTimeoutError = None
+
+def _get_playwright():
+    global PlaywrightTimeoutError
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    return PlaywrightTimeoutError
+
 from playwright.sync_api import sync_playwright
 
 DEFAULT_TIMEOUT_SECONDS = 20.0

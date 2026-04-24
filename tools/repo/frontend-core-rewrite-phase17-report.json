@@ -1,0 +1,4077 @@
+{
+  "phase": 17,
+  "description": "Rewrite imports for moved frontend core files",
+  "dry_run": false,
+  "rule_count": 145,
+  "rewrite_file_count": 324,
+  "rewrites": [
+    {
+      "file": "apps/suite-web/src/bootstrap/main.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:App->apps/suite-web/src/app/App",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+App([\"\\'])",
+          "replacement": "\"apps/suite-web/src/app/App\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/1.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/10.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/12.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/2.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/3.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/4.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/5.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/6.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/7.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-05/9.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/1.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/10.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/12.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/13.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/14.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/15.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/16.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/19.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/2.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/20.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/21.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/22.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/23.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/24.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/25.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/30.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/31.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/35.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/37.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/39.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/4.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/40.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/42.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/43.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/46.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/47.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/49.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/5.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/50.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/51.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/6.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/7.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-06/9.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/1.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/10.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/12.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/13.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/14.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/15.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/16.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/19.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/2.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/20.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/21.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/22.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/23.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/24.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/25.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/30.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/31.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/35.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/37.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/39.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/4.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/40.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/42.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/43.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/46.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/47.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/49.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/5.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/50.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/51.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/58.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/6.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/60.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/62.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/63.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/64.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/65.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/66.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/67.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/68.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/69.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/7.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/70.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/71.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/74.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/75.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/76.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/policy_raw/2026-03-13/9.html",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/main.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:App->apps/suite-web/src/app/App",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+App([\"\\'])",
+          "replacement": "\"apps/suite-web/src/app/App\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/dist/assets/index-C8YRq0W3.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/any-promise/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/arg/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/autoprefixer/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/baseline-browser-mapping/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/braces/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/caniuse-lite/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/chokidar/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/clsx/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/commander/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/convert-source-map/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/cssesc/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/csstype/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/debug/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/didyoumean/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/dlv/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/electron-to-chromium/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/esbuild/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/escalade/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/fast-glob/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/fastq/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/fill-range/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/fraction.js/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/function-bind/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/gensync/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/glob-parent/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/hasown/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/is-core-module/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/is-extglob/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/is-glob/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/is-number/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/jiti/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/jsesc/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/json5/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/lilconfig/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/lines-and-columns/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/loose-envify/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/lru-cache/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/lucide-react/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/merge2/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/micromatch/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/motion-dom/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/motion-utils/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/ms/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/nanoid/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/normalize-path/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/object-hash/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/path-parse/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/picocolors/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/picomatch/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/pirates/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/postcss/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/postcss-load-config/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/postcss-selector-parser/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/postcss-value-parser/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/queue-microtask/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/react/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/react-dom/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/react-refresh/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/react-router/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/react-router-dom/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/read-cache/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/readdirp/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/reusify/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/rollup/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/run-parallel/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/scheduler/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/semver/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/source-map-js/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/sucrase/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/supports-preserve-symlinks-flag/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/tailwindcss/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/tinyglobby/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/to-regex-range/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/ts-interface-checker/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/tslib/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/typescript/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/util-deprecate/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/vite/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/yallist/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/code-frame/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/core/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/generator/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/helper-compilation-targets/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/helper-module-imports/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/helper-module-transforms/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/helper-plugin-utils/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/helper-string-parser/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/helper-validator-identifier/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/helper-validator-option/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/helpers/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/parser/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/plugin-transform-react-jsx-self/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/plugin-transform-react-jsx-source/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/template/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/traverse/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/types/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@babel/core/lib/vendor/import-meta-resolve.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@jridgewell/gen-mapping/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@jridgewell/remapping/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@jridgewell/resolve-uri/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@jridgewell/sourcemap-codec/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@jridgewell/trace-mapping/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@nodelib/fs.scandir/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@nodelib/fs.stat/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@nodelib/fs.walk/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@remix-run/router/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@rolldown/pluginutils/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@rollup/rollup-win32-x64-gnu/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@rollup/rollup-win32-x64-msvc/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/babel__core/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/babel__generator/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/babel__template/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/babel__traverse/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/estree/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/node/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/node/sqlite.d.ts",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "7"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/prop-types/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/react/index.d.ts",
+      "replacements": [
+        {
+          "rule": "short_src:App->apps/suite-web/src/app/App",
+          "pattern": "([\"\\'])App([\"\\'])",
+          "replacement": "\"apps/suite-web/src/app/App\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/react/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/react-dom/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@types/react/ts5.0/index.d.ts",
+      "replacements": [
+        {
+          "rule": "short_src:App->apps/suite-web/src/app/App",
+          "pattern": "([\"\\'])App([\"\\'])",
+          "replacement": "\"apps/suite-web/src/app/App\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/@vitejs/plugin-react/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/chokidar/node_modules/glob-parent/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/fast-glob/node_modules/glob-parent/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/client/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/dist/client.d.ts",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/dist/m.d.ts",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/dom/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/m/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/mini/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/dist/cjs/client.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/dist/cjs/m.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/framer-motion/dom/mini/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/jiti/dist/babel.js",
+      "replacements": [
+        {
+          "rule": "short_src:App->apps/suite-web/src/app/App",
+          "pattern": "([\"\\'])App([\"\\'])",
+          "replacement": "\"apps/suite-web/src/app/App\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "5"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/jiti/dist/jiti.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/nanoid/async/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/nanoid/non-secure/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/nanoid/url-alphabet/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/react-dom/cjs/react-dom.development.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/react-dom/umd/react-dom.development.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/filter.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/filter_sync.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "3"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver_sync.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/module_dir/zmodules/bbb/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/baz/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/browser_field/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/dot_main/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/dot_slash_main/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/false_main/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/incorrect_main/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/invalid_main/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/multirepo/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/multirepo/packages/package-a/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/multirepo/packages/package-b/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/resolve/test/resolver/symlinked/package/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/tinyglobby/node_modules/fdir/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/tinyglobby/node_modules/picomatch/package.json",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/typescript/lib/lib.dom.d.ts",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/typescript/lib/typescript.d.ts",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/typescript/lib/typescript.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/typescript/lib/_tsc.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "3"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/node_modules/vite/dist/node/chunks/dep-D-7KCb9p.js",
+      "replacements": [
+        {
+          "rule": "short_src:main->apps/suite-web/src/bootstrap/main",
+          "pattern": "([\"\\'])main([\"\\'])",
+          "replacement": "\"apps/suite-web/src/bootstrap/main\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:PaneSwitcher->onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+PaneSwitcher([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:AppHeader->onehaven_onehaven_platform/frontend/src/shell/AppHeader",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+AppHeader([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/AppHeader\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:Artwork->packages/ui/src/components/Artwork",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+Artwork([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Artwork\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:GlassCard->packages/ui/src/components/GlassCard",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+GlassCard([\"\\'])",
+          "replacement": "\"packages/ui/src/components/GlassCard\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:GlassCard->packages/ui/src/components/GlassCard",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+GlassCard([\"\\'])",
+          "replacement": "\"packages/ui/src/components/GlassCard\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:GlassCard->packages/ui/src/components/GlassCard",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+GlassCard([\"\\'])",
+          "replacement": "\"packages/ui/src/components/GlassCard\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:Spinner->packages/ui/src/components/Spinner",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+Spinner([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Spinner\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/IngestionSourcesPanel.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:GlassCard->packages/ui/src/components/GlassCard",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+GlassCard([\"\\'])",
+          "replacement": "\"packages/ui/src/components/GlassCard\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:Spinner->packages/ui/src/components/Spinner",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+Spinner([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Spinner\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/RehabFromPhotosCTA.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:AppFooter->onehaven_onehaven_platform/frontend/src/shell/AppFooter",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+AppFooter([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/AppFooter\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:AppHeader->onehaven_onehaven_platform/frontend/src/shell/AppHeader",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+AppHeader([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/AppHeader\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:AuroraBackground->packages/ui/src/components/AuroraBackground",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+AuroraBackground([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AuroraBackground\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceDocumentStack.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceDocumentUploader.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/AppSelect->packages/ui/src/components/AppSelect",
+          "pattern": "([\"\\'])@/components/AppSelect([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AppSelect\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/CompliancePhotoFindingsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceReminderPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionReadiness.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionSchedulerModal.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/AppSelect->packages/ui/src/components/AppSelect",
+          "pattern": "([\"\\'])@/components/AppSelect([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AppSelect\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionTimelineCard.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyJurisdictionRulesPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/investor_intelligence/components/PaneSummaryCards.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/PaneSwitcher->onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher",
+          "pattern": "([\"\\'])@/components/PaneSwitcher([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher\"",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/investor_intelligence/pages/InvestorPane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/AppSelect->packages/ui/src/components/AppSelect",
+          "pattern": "([\"\\'])@/components/AppSelect([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AppSelect\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/IngestionErrorsDrawer->onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer",
+          "pattern": "([\"\\'])@/components/IngestionErrorsDrawer([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PaneSwitcher->onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher",
+          "pattern": "([\"\\'])@/components/PaneSwitcher([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/StatPill->packages/ui/src/components/StatPill",
+          "pattern": "([\"\\'])@/components/StatPill([\"\\'])",
+          "replacement": "\"packages/ui/src/components/StatPill\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/management/components/NextActionsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/management/components/PhotoGallery.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/management/components/PhotoUploader.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/AppSelect->packages/ui/src/components/AppSelect",
+          "pattern": "([\"\\'])@/components/AppSelect([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AppSelect\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/management/components/StageProgress.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/management/pages/Dashboard.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/Golem->packages/ui/src/components/Golem",
+          "pattern": "([\"\\'])@/components/Golem([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Golem\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/KpiCard->packages/ui/src/components/KpiCard",
+          "pattern": "([\"\\'])@/components/KpiCard([\"\\'])",
+          "replacement": "\"packages/ui/src/components/KpiCard\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PaneSwitcher->onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher",
+          "pattern": "([\"\\'])@/components/PaneSwitcher([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/management/pages/ManagementPane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/tenant/components/TenantPipeline.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/tenant/pages/TenantsPane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "packages/ui/src/components/Golem.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:Artwork->packages/ui/src/components/Artwork",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+Artwork([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Artwork\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:GlassCard->packages/ui/src/components/GlassCard",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+GlassCard([\"\\'])",
+          "replacement": "\"packages/ui/src/components/GlassCard\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/shell/AppHeader.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:PaneSwitcher->onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+PaneSwitcher([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/shell/AppShell.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:AppHeader->onehaven_onehaven_platform/frontend/src/shell/AppHeader",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+AppHeader([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/AppHeader\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/frontend/src/shell/Shell.tsx",
+      "replacements": [
+        {
+          "rule": "relative_basename:AppFooter->onehaven_onehaven_platform/frontend/src/shell/AppFooter",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+AppFooter([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/AppFooter\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:AppHeader->onehaven_onehaven_platform/frontend/src/shell/AppHeader",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+AppHeader([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/AppHeader\"",
+          "count": "1"
+        },
+        {
+          "rule": "relative_basename:AuroraBackground->packages/ui/src/components/AuroraBackground",
+          "pattern": "([\"\\'])(\\./|\\.\\./)+AuroraBackground([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AuroraBackground\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/components/AcquisitionDeadlinePanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/components/DocumentFieldReviewPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionPane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionQueue.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Golem->packages/ui/src/components/Golem",
+          "pattern": "([\"\\'])@/components/Golem([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Golem\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/DealIntake.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/GlassCard->packages/ui/src/components/GlassCard",
+          "pattern": "([\"\\'])@/components/GlassCard([\"\\'])",
+          "replacement": "\"packages/ui/src/components/GlassCard\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/ComplianceDocumentStack.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/ComplianceDocumentUploader.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/AppSelect->packages/ui/src/components/AppSelect",
+          "pattern": "([\"\\'])@/components/AppSelect([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AppSelect\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/CompliancePhotoFindingsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/ComplianceReminderPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/InspectionReadiness.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/InspectionSchedulerModal.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/AppSelect->packages/ui/src/components/AppSelect",
+          "pattern": "([\"\\'])@/components/AppSelect([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AppSelect\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/InspectionTimelineCard.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/frontend/src/components/PaneSummaryCards.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/PaneSwitcher->onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher",
+          "pattern": "([\"\\'])@/components/PaneSwitcher([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher\"",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/frontend/src/pages/InvestorPane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/AppSelect->packages/ui/src/components/AppSelect",
+          "pattern": "([\"\\'])@/components/AppSelect([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AppSelect\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/IngestionErrorsDrawer->onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer",
+          "pattern": "([\"\\'])@/components/IngestionErrorsDrawer([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/notifications/IngestionErrorsDrawer\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PaneSwitcher->onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher",
+          "pattern": "([\"\\'])@/components/PaneSwitcher([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/StatPill->packages/ui/src/components/StatPill",
+          "pattern": "([\"\\'])@/components/StatPill([\"\\'])",
+          "replacement": "\"packages/ui/src/components/StatPill\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/NextActionsPanel.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/PhotoGallery.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/PhotoUploader.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/AppSelect->packages/ui/src/components/AppSelect",
+          "pattern": "([\"\\'])@/components/AppSelect([\"\\'])",
+          "replacement": "\"packages/ui/src/components/AppSelect\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/components/StageProgress.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/pages/Dashboard.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/Golem->packages/ui/src/components/Golem",
+          "pattern": "([\"\\'])@/components/Golem([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Golem\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/KpiCard->packages/ui/src/components/KpiCard",
+          "pattern": "([\"\\'])@/components/KpiCard([\"\\'])",
+          "replacement": "\"packages/ui/src/components/KpiCard\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PaneSwitcher->onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher",
+          "pattern": "([\"\\'])@/components/PaneSwitcher([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PaneSwitcher\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/frontend/src/pages/ManagementPane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/tenants/frontend/src/components/TenantPipeline.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/tenants/frontend/src/pages/TenantsPane.tsx",
+      "replacements": [
+        {
+          "rule": "short_alias:@/components/EmptyState->packages/ui/src/components/EmptyState",
+          "pattern": "([\"\\'])@/components/EmptyState([\"\\'])",
+          "replacement": "\"packages/ui/src/components/EmptyState\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageHero->onehaven_onehaven_platform/frontend/src/shell/PageHero",
+          "pattern": "([\"\\'])@/components/PageHero([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageHero\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/PageShell->onehaven_onehaven_platform/frontend/src/shell/PageShell",
+          "pattern": "([\"\\'])@/components/PageShell([\"\\'])",
+          "replacement": "\"onehaven_onehaven_platform/frontend/src/shell/PageShell\"",
+          "count": "1"
+        },
+        {
+          "rule": "short_alias:@/components/Surface->packages/ui/src/components/Surface",
+          "pattern": "([\"\\'])@/components/Surface([\"\\'])",
+          "replacement": "\"packages/ui/src/components/Surface\"",
+          "count": "1"
+        }
+      ]
+    }
+  ]
+}

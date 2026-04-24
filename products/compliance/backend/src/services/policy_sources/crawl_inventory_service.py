@@ -6,13 +6,13 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import normalize_categories
-from app.policy_models import PolicySource, PolicySourceInventory
-from app.products.compliance.services.policy_sources.discovery_service import (
+from onehaven_platform.backend.src.domain.policy.categories import normalize_categories
+from onehaven_platform.backend.src.policy_models import PolicySource, PolicySourceInventory
+from products.compliance.backend.src.services.policy_sources.discovery_service import (
     sync_policy_source_into_inventory,
     update_inventory_after_fetch,
 )
-from app.products.compliance.services.policy_sources.source_service import _is_rejected_discovered_source
+from products.compliance.backend.src.services.policy_sources.source_service import _is_rejected_discovered_source
 
 
 AUTHORITY_TIER_RANKS: dict[str, int] = {

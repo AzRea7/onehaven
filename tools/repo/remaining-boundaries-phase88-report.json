@@ -1,0 +1,245 @@
+{
+  "phase": 88,
+  "dry_run": false,
+  "remove_source": false,
+  "summary": {
+    "moves": 7,
+    "rewrites": 18,
+    "facade_rewrites": 6,
+    "platform_patches": 2,
+    "skipped": 1
+  },
+  "actions": [
+    {
+      "kind": "move",
+      "source": "products/ops/backend/src/services/dashboard_rollups.py",
+      "target": "onehaven_platform/backend/src/services/dashboard_rollup_service.py",
+      "status": "copied",
+      "reason": "source_preserved"
+    },
+    {
+      "kind": "move",
+      "source": "products/ops/backend/src/services/photo_rehab_agent.py",
+      "target": "onehaven_platform/backend/src/services/photo_rehab_service.py",
+      "status": "copied",
+      "reason": "source_preserved"
+    },
+    {
+      "kind": "move",
+      "source": "products/compliance/backend/src/domain/jurisdiction_scoring.py",
+      "target": "onehaven_platform/backend/src/services/jurisdiction_scoring_service.py",
+      "status": "copied",
+      "reason": "source_preserved"
+    },
+    {
+      "kind": "move",
+      "source": "products/compliance/backend/src/domain/inspection/compliance_completion.py",
+      "target": "onehaven_platform/backend/src/services/compliance_completion_service.py",
+      "status": "copied",
+      "reason": "source_preserved"
+    },
+    {
+      "kind": "move",
+      "source": "products/compliance/backend/src/services/inspections/failure_task_service.py",
+      "target": "onehaven_platform/backend/src/services/inspection_failure_task_service.py",
+      "status": "copied",
+      "reason": "source_preserved"
+    },
+    {
+      "kind": "move",
+      "source": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "target": "onehaven_platform/backend/src/services/inspection_readiness_service.py",
+      "status": "copied",
+      "reason": "source_preserved"
+    },
+    {
+      "kind": "move",
+      "source": "products/compliance/backend/src/services/jurisdiction_task_mapper.py",
+      "target": "onehaven_platform/backend/src/services/jurisdiction_task_mapper_service.py",
+      "status": "copied",
+      "reason": "source_preserved"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/domain/compliance_completion.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/routers/compliance.py",
+      "target": null,
+      "status": "updated",
+      "reason": "3_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/routers/inspections.py",
+      "target": null,
+      "status": "updated",
+      "reason": "3_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/routers/ops.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/routers/rehab.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/services/compliance_service.py",
+      "target": null,
+      "status": "updated",
+      "reason": "2_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/domain/compliance/compliance_completion.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/domain/inspection/compliance_completion.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/services/inspections/inspections.py",
+      "target": null,
+      "status": "updated",
+      "reason": "3_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/intelligence/backend/src/routers/evaluate.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/ops/backend/src/routers/dashboard.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/ops/backend/src/routers/ops.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/ops/backend/src/routers/properties.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "products/ops/backend/src/routers/rehab.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "onehaven_platform/backend/src/services/compliance_completion_service.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "rewrite",
+      "source": "onehaven_platform/backend/src/services/state_machine_service.py",
+      "target": null,
+      "status": "updated",
+      "reason": "4_replacements"
+    },
+    {
+      "kind": "facade_rewrite",
+      "source": "products/ops/backend/src/routers/ops.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "facade_rewrite",
+      "source": "products/ops/backend/src/routers/properties.py",
+      "target": null,
+      "status": "updated",
+      "reason": "2_replacements"
+    },
+    {
+      "kind": "facade_rewrite",
+      "source": "products/ops/backend/src/routers/rehab.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "facade_rewrite",
+      "source": "products/ops/backend/src/services/photo_rehab_agent.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "facade_rewrite",
+      "source": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "facade_rewrite",
+      "source": "products/ops/backend/src/services/stage_guard.py",
+      "target": null,
+      "status": "skipped",
+      "reason": "file_missing"
+    },
+    {
+      "kind": "platform_patch",
+      "source": "onehaven_platform/backend/src/services/photo_rehab_service.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    },
+    {
+      "kind": "platform_patch",
+      "source": "onehaven_platform/backend/src/services/inspection_readiness_service.py",
+      "target": null,
+      "status": "updated",
+      "reason": "1_replacements"
+    }
+  ]
+}

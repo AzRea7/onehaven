@@ -10,8 +10,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.policy_models import JurisdictionProfile, PolicySource
+from onehaven_platform.backend.src.config import settings
+from onehaven_platform.backend.src.policy_models import JurisdictionProfile, PolicySource
 
 
 LEGAL_BLOCKING_CATEGORIES = {"registration", "inspection", "occupancy", "lead", "section8", "program_overlay", "safety"}

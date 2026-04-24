@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AcquisitionDeal, Document, Task
+from onehaven_platform.backend.src.models import AcquisitionDeal, Document, Task
 
 
 REQUIRED_DOCUMENT_KINDS = (

@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.auth import get_principal, require_operator
-from app.services.market_catalog_service import (
+from onehaven_platform.backend.src.auth import get_principal, require_operator
+from products.intelligence.backend.src.services.market_catalog_service import (
     find_market_by_city,
     get_market,
     list_active_supported_markets,
 )
-from app.services.market_sync_service import build_supported_market_sync_plan
-from app.tasks.ingestion_tasks import sync_source_task
+from products.intelligence.backend.src.services.market_sync_service import build_supported_market_sync_plan
+from onehaven_platform.backend.src.jobs.ingestion_tasks import sync_source_task
 
 router = APIRouter(prefix="/markets", tags=["markets"])
 
@@ -83,7 +83,7 @@ def get_market_coverage_with_evidence(
     state: str = Query("MI"),
     p=Depends(get_principal),
 ):
-    from app.services.policy_evidence_service import evidence_summary_for_market
+    from products.compliance.backend.src.services.policy_evidence_service import evidence_summary_for_market
 
     market = find_market_by_city(city=city, state=state)
     evidence = evidence_summary_for_market(

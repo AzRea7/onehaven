@@ -1,0 +1,104 @@
+{
+  "phase": 19,
+  "description": "Move product-owned frontend files",
+  "dry_run": false,
+  "remove_legacy": false,
+  "selected_product": "compliance",
+  "candidate_count": 13,
+  "would_move_count": 0,
+  "moved_count": 3,
+  "skipped_count": 10,
+  "results": [
+    {
+      "source": "frontend/src/pages/JurisdictionProfiles.tsx",
+      "target": "products/compliance/frontend/src/pages/JurisdictionProfiles.tsx",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/pages/Jurisdictions.tsx",
+      "target": "products/compliance/frontend/src/pages/Jurisdictions.tsx",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/pages/PolicyReview.tsx",
+      "target": "products/compliance/frontend/src/pages/PolicyReview.tsx",
+      "product": "compliance",
+      "status": "moved",
+      "reason": "copied_successfully"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/ComplianceDocumentStack.tsx",
+      "target": "products/compliance/frontend/src/components/ComplianceDocumentStack.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/CompliancePhotoFindingsPanel.tsx",
+      "target": "products/compliance/frontend/src/components/CompliancePhotoFindingsPanel.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/ComplianceReminderPanel.tsx",
+      "target": "products/compliance/frontend/src/components/ComplianceReminderPanel.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/InspectionReadiness.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionReadiness.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/InspectionSchedulerModal.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionSchedulerModal.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/InspectionTimelineCard.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionTimelineCard.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/JurisdictionCoverageBadge.tsx",
+      "target": "products/compliance/frontend/src/components/JurisdictionCoverageBadge.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/PropertyCompliancePanel.tsx",
+      "target": "products/compliance/frontend/src/components/PropertyCompliancePanel.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/components/PropertyJurisdictionRulesPanel.tsx",
+      "target": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "frontend/src/products/compliance/pages/CompliancePane.tsx",
+      "target": "products/compliance/frontend/src/pages/CompliancePane.tsx",
+      "product": "compliance",
+      "status": "skipped",
+      "reason": "target_exists"
+    }
+  ]
+}

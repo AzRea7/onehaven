@@ -1,0 +1,32 @@
+{
+  "phase": 95,
+  "repo_root": "C:\\Users\\austin\\onehaven",
+  "modules": [
+    {
+      "module": "apps.suite_api.app.main",
+      "status": "error",
+      "error": "ImportError(\"cannot import name 'list_property_tags' from 'onehaven_platform.backend.src.adapters.acquire_adapter' (C:\\\\Users\\\\austin\\\\onehaven\\\\onehaven_platform\\\\backend\\\\src\\\\adapters\\\\acquire_adapter.py)\")"
+    },
+    {
+      "module": "onehaven_platform.backend.src.services.trust",
+      "status": "ok"
+    },
+    {
+      "module": "products.compliance.backend.src.services.product.compliance_brief_service",
+      "status": "ok"
+    },
+    {
+      "module": "products.acquire.backend.src.services.product.acquisition_workspace_service",
+      "status": "ok"
+    },
+    {
+      "module": "products.intelligence.backend.src.services.product.deal_intelligence_service",
+      "status": "ok"
+    },
+    {
+      "module": "products.ops.backend.src.services.product.property_ops_summary_service",
+      "status": "ok"
+    }
+  ],
+  "ok": false
+}

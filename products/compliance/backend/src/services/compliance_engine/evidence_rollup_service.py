@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.policy_models import PolicyAssertion, PolicySource
+from onehaven_platform.backend.src.policy_models import PolicyAssertion, PolicySource
 
 
 def _loads_dict(value: Any) -> dict[str, Any]:

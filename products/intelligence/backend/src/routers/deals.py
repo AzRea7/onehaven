@@ -7,12 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal
-from app.db import get_db
-from app.domain.audit import emit_audit
-from app.domain.operating_truth_enforcement import enforce_constitution_for_property_and_price
-from app.models import Deal, ImportSnapshot, Property, RentAssumption, UnderwritingResult
-from app.schemas import (
+from onehaven_platform.backend.src.auth import get_principal
+from onehaven_platform.backend.src.db import get_db
+from onehaven_platform.backend.src.domain.audit import emit_audit
+from onehaven_platform.backend.src.domain.operating_truth_enforcement import enforce_constitution_for_property_and_price
+from onehaven_platform.backend.src.models import Deal, ImportSnapshot, Property, RentAssumption, UnderwritingResult
+from onehaven_platform.backend.src.schemas import (
     DealCreate,
     DealIntakeIn,
     DealIntakeOut,
@@ -22,8 +22,8 @@ from app.schemas import (
     RentAssumptionUpsert,
     SurvivorOut,
 )
-from app.services.events_facade import wf
-from app.products.management.services.properties.state_machine import sync_property_state
+from onehaven_platform.backend.src.services.events_facade import wf
+from onehaven_platform.backend.src.services.state_machine_service import sync_property_state
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 

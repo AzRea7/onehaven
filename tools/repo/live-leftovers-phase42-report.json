@@ -1,0 +1,3266 @@
+{
+  "phase": 42,
+  "summary": {
+    "total_live_leftovers": 338,
+    "priority": {
+      "low": 132,
+      "high": 16,
+      "medium": 190
+    },
+    "owner_hints": {
+      "unclear": 178,
+      "compliance": 44,
+      "intelligence": 21,
+      "platform": 28,
+      "acquire": 15,
+      "ops": 12,
+      "tenants": 1,
+      "frontend_component": 31,
+      "frontend_page": 8
+    }
+  },
+  "top_prefix_groups": [
+    {
+      "prefix": "onehaven_decision_engine/backend/app/alembic",
+      "count": 93,
+      "priority_mix": {
+        "low": 93
+      },
+      "owner_mix": {
+        "unclear": 56,
+        "acquire": 7,
+        "intelligence": 7,
+        "ops": 3,
+        "platform": 5,
+        "tenants": 1,
+        "compliance": 14
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/alembic/env.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0001_init.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0002_compliance.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0003_imports.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0004_rent_learning.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0005_api_usage.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0006_compliance_and_rent_policy_fields.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0007_add_deal_strategy.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0008_ops_and_agents.py",
+        "onehaven_decision_engine/backend/app/alembic/versions/0009_add_underwriting_result_meta.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/services",
+      "count": 81,
+      "priority_mix": {
+        "medium": 81
+      },
+      "owner_mix": {
+        "platform": 9,
+        "unclear": 53,
+        "acquire": 1,
+        "compliance": 13,
+        "ops": 1,
+        "intelligence": 4
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/services/address_normalization.py",
+        "onehaven_decision_engine/backend/app/services/agent_actions.py",
+        "onehaven_decision_engine/backend/app/services/agent_concurrency.py",
+        "onehaven_decision_engine/backend/app/services/agent_engine.py",
+        "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+        "onehaven_decision_engine/backend/app/services/agent_orchestrator_runtime.py",
+        "onehaven_decision_engine/backend/app/services/agent_threads.py",
+        "onehaven_decision_engine/backend/app/services/agent_trace.py",
+        "onehaven_decision_engine/backend/app/services/auth_service.py",
+        "onehaven_decision_engine/backend/app/services/budget_service.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/domain",
+      "count": 58,
+      "priority_mix": {
+        "medium": 58
+      },
+      "owner_mix": {
+        "unclear": 30,
+        "compliance": 3,
+        "intelligence": 7,
+        "platform": 12,
+        "acquire": 4,
+        "ops": 2
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/domain/audit.py",
+        "onehaven_decision_engine/backend/app/domain/cashflow.py",
+        "onehaven_decision_engine/backend/app/domain/compliance.py",
+        "onehaven_decision_engine/backend/app/domain/decision_engine.py",
+        "onehaven_decision_engine/backend/app/domain/events.py",
+        "onehaven_decision_engine/backend/app/domain/fingerprint.py",
+        "onehaven_decision_engine/backend/app/domain/jurisdiction_scoring.py",
+        "onehaven_decision_engine/backend/app/domain/operating_truth.py",
+        "onehaven_decision_engine/backend/app/domain/operating_truth_enforcement.py",
+        "onehaven_decision_engine/backend/app/domain/rent_explain_runs.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src/components",
+      "count": 32,
+      "priority_mix": {
+        "medium": 32
+      },
+      "owner_mix": {
+        "frontend_component": 31,
+        "ops": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+        "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+        "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+        "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+        "onehaven_decision_engine/frontend/src/components/Artwork.tsx"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/routers",
+      "count": 13,
+      "priority_mix": {
+        "high": 13
+      },
+      "owner_mix": {
+        "unclear": 8,
+        "platform": 1,
+        "acquire": 2,
+        "ops": 1,
+        "intelligence": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/routers/agents.py",
+        "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+        "onehaven_decision_engine/backend/app/routers/api_keys.py",
+        "onehaven_decision_engine/backend/app/routers/auth.py",
+        "onehaven_decision_engine/backend/app/routers/automation.py",
+        "onehaven_decision_engine/backend/app/routers/geo.py",
+        "onehaven_decision_engine/backend/app/routers/health.py",
+        "onehaven_decision_engine/backend/app/routers/imports.py",
+        "onehaven_decision_engine/backend/app/routers/imports_alias.py",
+        "onehaven_decision_engine/backend/app/routers/ingestion.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src/pages",
+      "count": 11,
+      "priority_mix": {
+        "medium": 11
+      },
+      "owner_mix": {
+        "frontend_page": 8,
+        "acquire": 1,
+        "compliance": 2
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+        "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+        "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+        "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+        "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+        "onehaven_decision_engine/frontend/src/pages/Register.tsx"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/products",
+      "count": 9,
+      "priority_mix": {
+        "low": 1,
+        "medium": 8
+      },
+      "owner_mix": {
+        "compliance": 9
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/products/compliance/__init__.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/compliance_photo_analysis_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/__init__.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+        "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__init__.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src/lib",
+      "count": 6,
+      "priority_mix": {
+        "low": 6
+      },
+      "owner_mix": {
+        "unclear": 5,
+        "intelligence": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/lib/api.ts",
+        "onehaven_decision_engine/frontend/src/lib/auth.tsx",
+        "onehaven_decision_engine/frontend/src/lib/authFlow.ts",
+        "onehaven_decision_engine/frontend/src/lib/dealRules.ts",
+        "onehaven_decision_engine/frontend/src/lib/filters.ts",
+        "onehaven_decision_engine/frontend/src/lib/ingestionClient.ts"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/clients",
+      "count": 5,
+      "priority_mix": {
+        "low": 5
+      },
+      "owner_mix": {
+        "unclear": 4,
+        "intelligence": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/clients/federal_register.py",
+        "onehaven_decision_engine/backend/app/clients/govinfo.py",
+        "onehaven_decision_engine/backend/app/clients/hud_counselor.py",
+        "onehaven_decision_engine/backend/app/clients/hud_user.py",
+        "onehaven_decision_engine/backend/app/clients/rentcast.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/workers",
+      "count": 4,
+      "priority_mix": {
+        "low": 4
+      },
+      "owner_mix": {
+        "ops": 2,
+        "platform": 1,
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/workers/agent_tasks.py",
+        "onehaven_decision_engine/backend/app/workers/agent_worker.py",
+        "onehaven_decision_engine/backend/app/workers/celery_app.py",
+        "onehaven_decision_engine/backend/app/workers/risk_tasks.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/tasks",
+      "count": 3,
+      "priority_mix": {
+        "low": 3
+      },
+      "owner_mix": {
+        "ops": 2,
+        "compliance": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/tasks/ingestion_tasks.py",
+        "onehaven_decision_engine/backend/app/tasks/jurisdiction_tasks.py",
+        "onehaven_decision_engine/backend/app/tasks/market_sync_tasks.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/frontend/src/styles",
+      "count": 3,
+      "priority_mix": {
+        "low": 3
+      },
+      "owner_mix": {
+        "unclear": 3
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/frontend/src/styles/globals.css",
+        "onehaven_decision_engine/frontend/src/styles/motion.css",
+        "onehaven_decision_engine/frontend/src/styles/tokens.css"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/cli",
+      "count": 2,
+      "priority_mix": {
+        "low": 2
+      },
+      "owner_mix": {
+        "unclear": 2
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/cli/seed_demo.py",
+        "onehaven_decision_engine/backend/app/cli/__main__.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/middleware",
+      "count": 2,
+      "priority_mix": {
+        "low": 2
+      },
+      "owner_mix": {
+        "unclear": 2
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/middleware/request_id.py",
+        "onehaven_decision_engine/backend/app/middleware/structured_logging.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/alembic.ini",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/alembic.ini"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/auth.py",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/auth.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/config.py",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/config.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/db.py",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/db.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/logging_config.py",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/logging_config.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/main.py",
+      "count": 1,
+      "priority_mix": {
+        "high": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/main.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/models.py",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/models.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/policy_models.py",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "compliance": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/policy_models.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/schemas.py",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/schemas.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/__init__.py",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/__init__.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/integrations",
+      "count": 1,
+      "priority_mix": {
+        "low": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/integrations/lm_studio_client.py"
+      ]
+    }
+  ],
+  "top_filenames": [
+    {
+      "filename": "__init__.py",
+      "count": 12
+    },
+    {
+      "filename": "auth.py",
+      "count": 2
+    },
+    {
+      "filename": "photo_rehab_agent.py",
+      "count": 2
+    },
+    {
+      "filename": "registry.py",
+      "count": 2
+    },
+    {
+      "filename": "base.py",
+      "count": 2
+    },
+    {
+      "filename": "alembic.ini",
+      "count": 1
+    },
+    {
+      "filename": "config.py",
+      "count": 1
+    },
+    {
+      "filename": "db.py",
+      "count": 1
+    },
+    {
+      "filename": "logging_config.py",
+      "count": 1
+    },
+    {
+      "filename": "main.py",
+      "count": 1
+    },
+    {
+      "filename": "models.py",
+      "count": 1
+    },
+    {
+      "filename": "policy_models.py",
+      "count": 1
+    },
+    {
+      "filename": "schemas.py",
+      "count": 1
+    },
+    {
+      "filename": "env.py",
+      "count": 1
+    },
+    {
+      "filename": "seed_demo.py",
+      "count": 1
+    },
+    {
+      "filename": "__main__.py",
+      "count": 1
+    },
+    {
+      "filename": "federal_register.py",
+      "count": 1
+    },
+    {
+      "filename": "govinfo.py",
+      "count": 1
+    },
+    {
+      "filename": "hud_counselor.py",
+      "count": 1
+    },
+    {
+      "filename": "hud_user.py",
+      "count": 1
+    },
+    {
+      "filename": "rentcast.py",
+      "count": 1
+    },
+    {
+      "filename": "audit.py",
+      "count": 1
+    },
+    {
+      "filename": "cashflow.py",
+      "count": 1
+    },
+    {
+      "filename": "compliance.py",
+      "count": 1
+    },
+    {
+      "filename": "decision_engine.py",
+      "count": 1
+    }
+  ],
+  "leftovers": [
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic.ini",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic.ini",
+      "filename": "alembic.ini"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/auth.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/auth.py",
+      "filename": "auth.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/config.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/config.py",
+      "filename": "config.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/db.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/db.py",
+      "filename": "db.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/logging_config.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/logging_config.py",
+      "filename": "logging_config.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/main.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/main.py",
+      "filename": "main.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/models.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/models.py",
+      "filename": "models.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/policy_models.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/policy_models.py",
+      "filename": "policy_models.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/schemas.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/schemas.py",
+      "filename": "schemas.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/__init__.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/__init__.py",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/env.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "env.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/cli/seed_demo.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/cli",
+      "filename": "seed_demo.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/cli/__main__.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/cli",
+      "filename": "__main__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/clients/federal_register.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/clients",
+      "filename": "federal_register.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/clients/govinfo.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/clients",
+      "filename": "govinfo.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/clients/hud_counselor.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/clients",
+      "filename": "hud_counselor.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/clients/hud_user.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/clients",
+      "filename": "hud_user.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/clients/rentcast.py",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/clients",
+      "filename": "rentcast.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/audit.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "audit.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/cashflow.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "cashflow.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "compliance.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/decision_engine.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "decision_engine.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/events.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "events.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/fingerprint.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "fingerprint.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/jurisdiction_scoring.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "jurisdiction_scoring.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "operating_truth.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth_enforcement.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "operating_truth_enforcement.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_explain_runs.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "rent_explain_runs.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_learning.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "rent_learning.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/underwriting.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "underwriting.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/valuation_cadence.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "valuation_cadence.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/__init__.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/integrations/lm_studio_client.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/integrations",
+      "filename": "lm_studio_client.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/middleware/request_id.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/middleware",
+      "filename": "request_id.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/middleware/structured_logging.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/middleware",
+      "filename": "structured_logging.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "agents.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+      "priority": "high",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "agent_runs.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/api_keys.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "api_keys.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/auth.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "auth.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/automation.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "automation.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/geo.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "geo.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/health.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "health.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports.py",
+      "priority": "high",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "imports.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/imports_alias.py",
+      "priority": "high",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "imports_alias.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/ingestion.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "ingestion.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/meta.py",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "meta.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "priority": "high",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "rehab.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/routers/rent.py",
+      "priority": "high",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/routers",
+      "filename": "rent.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/seed/jurisdictions_seed.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/seed",
+      "filename": "jurisdictions_seed.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/address_normalization.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "address_normalization.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_actions.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "agent_actions.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_concurrency.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "agent_concurrency.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_engine.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "agent_engine.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "agent_orchestrator.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator_runtime.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "agent_orchestrator_runtime.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_threads.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "agent_threads.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_trace.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "agent_trace.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/auth_service.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "auth_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/budget_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "budget_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/crime_index.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "crime_index.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/csv_import_mapping_service.py",
+      "priority": "medium",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "csv_import_mapping_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/events_facade.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "events_facade.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/external_budget.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "external_budget.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/fmr.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "fmr.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocode_cache_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "geocode_cache_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocoding_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "geocoding_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "geo_enrichment.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/hud_fmr_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "hud_fmr_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_dedupe_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "ingestion_dedupe_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_enrichment_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "ingestion_enrichment_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_execute.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "ingestion_run_execute.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "ingestion_run_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_scheduler_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "ingestion_scheduler_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_source_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "ingestion_source_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspection_scheduling_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "inspection_scheduling_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspector_communication_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "inspector_communication_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_profile_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "jurisdiction_profile_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_registry_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "jurisdiction_registry_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_source_family_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "jurisdiction_source_family_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_task_mapper.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "jurisdiction_task_mapper.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/lease_rules.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "lease_rules.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/locks_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "locks_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_catalog_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "market_catalog_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_sync_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "market_sync_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/offender_index.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "offender_index.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/onboarding_flows.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "onboarding_flows.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ownership.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "ownership.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/pane_routing_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "pane_routing_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/photo_rehab_agent.py",
+      "priority": "medium",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "photo_rehab_agent.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/plan_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "plan_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_catalog.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "policy_catalog.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_change_detection_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "policy_change_detection_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_crawl_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "policy_crawl_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "policy_evidence_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_version_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "policy_evidence_version_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_market_seed_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "policy_market_seed_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_rule_normalizer.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "policy_rule_normalizer.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_seed.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "policy_seed.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_ingestion_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "portfolio_ingestion_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_watchlist_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "portfolio_watchlist_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_ingestion_router_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "product_ingestion_router_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_surfaces.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "product_surfaces.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_insurance_enrichment_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "property_insurance_enrichment_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_normalization_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "property_normalization_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_photo_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "property_photo_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_price_resolution_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "property_price_resolution_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_tax_enrichment_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "property_tax_enrichment_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/public_tax_lookup_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "public_tax_lookup_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_listing_source.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "rentcast_listing_source.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_service.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "rentcast_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_comp_selection.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "rent_comp_selection.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_refresh_queue_service.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "rent_refresh_queue_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/runtime_metrics.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "runtime_metrics.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "stage_guard.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/trust_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "trust_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/usage_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "usage_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/virus_scanning_service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "virus_scanning_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/zillow_api_source.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "zillow_api_source.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/zillow_photo_source.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "zillow_photo_source.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/tasks/ingestion_tasks.py",
+      "priority": "low",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/tasks",
+      "filename": "ingestion_tasks.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/tasks/jurisdiction_tasks.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/tasks",
+      "filename": "jurisdiction_tasks.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/tasks/market_sync_tasks.py",
+      "priority": "low",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/tasks",
+      "filename": "market_sync_tasks.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/workers/agent_tasks.py",
+      "priority": "low",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/workers",
+      "filename": "agent_tasks.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/workers/agent_worker.py",
+      "priority": "low",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/workers",
+      "filename": "agent_worker.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/workers/celery_app.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/workers",
+      "filename": "celery_app.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/workers/risk_tasks.py",
+      "priority": "low",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/workers",
+      "filename": "risk_tasks.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0001_init.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0001_init.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0002_compliance.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0002_compliance.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0003_imports.py",
+      "priority": "low",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0003_imports.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0004_rent_learning.py",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0004_rent_learning.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0005_api_usage.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0005_api_usage.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0006_compliance_and_rent_policy_fields.py",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0006_compliance_and_rent_policy_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0007_add_deal_strategy.py",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0007_add_deal_strategy.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0008_ops_and_agents.py",
+      "priority": "low",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0008_ops_and_agents.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0009_add_underwriting_result_meta.py",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0009_add_underwriting_result_meta.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0010_agent_slots.py",
+      "priority": "low",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0010_agent_slots.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0011_multitenant_rbac_audit_eventlog.py",
+      "priority": "low",
+      "owner_hint": "tenants",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0011_multitenant_rbac_audit_eventlog.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0012_fix_org_scoping_not_null.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0012_fix_org_scoping_not_null.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0013_property_checklist_items_and_org_scoping.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0013_property_checklist_items_and_org_scoping.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0014_rehab_tasks_and_basic_ops_tables.py",
+      "priority": "low",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0014_rehab_tasks_and_basic_ops_tables.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0015_jurisdiction_org_scope.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0015_jurisdiction_org_scope.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0016_import_snapshots_org_scope.py",
+      "priority": "low",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0016_import_snapshots_org_scope.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0017_rent_explain_runs.py",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0017_rent_explain_runs.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0018_seed_jurisdiction_defaults.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0018_seed_jurisdiction_defaults.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0019_agent_messages_link_run_id.py",
+      "priority": "low",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0019_agent_messages_link_run_id.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0020_policy_tables.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0020_policy_tables.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0021_inspections_add_org_id.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0021_inspections_add_org_id.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0022_agent_runs_reliability_fields.py",
+      "priority": "low",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0022_agent_runs_reliability_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0023_agent_messages_add_run_id.py",
+      "priority": "low",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0023_agent_messages_add_run_id.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0024_add_agent_trace_events.py",
+      "priority": "low",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0024_add_agent_trace_events.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0025_saas_core_tables.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0025_saas_core_tables.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0026_add_limits_json_to_plans.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0026_add_limits_json_to_plans.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0027_widen_alembic_version.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0027_widen_alembic_version.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0028_add_last_login_at_to_app_users.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0028_add_last_login_at_to_app_users.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0029_create_checklist_template_items.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0029_create_checklist_template_items.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0030_add_trust_tables.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0030_add_trust_tables.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0031_add_saas_tables.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0031_add_saas_tables.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0032_fix_schema_drift.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0032_fix_schema_drift.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0033_force_schema_fix_rent_explain_run_id.py",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0033_force_schema_fix_rent_explain_run_id.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0034_add_leases_org_id.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0034_add_leases_org_id.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0035_ops_add_org_id_transactions_valuations.py",
+      "priority": "low",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0035_ops_add_org_id_transactions_valuations.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0036_add_geo_risk_workflow_pipeline.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0036_add_geo_risk_workflow_pipeline.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0037_add_org_id_to_app_users.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0037_add_org_id_to_app_users.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0038_repair_app_users_columns.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0038_repair_app_users_columns.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0039_safe_add_org_updated_at.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0039_safe_add_org_updated_at.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0040_policy_models_bootstrap.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0040_policy_models_bootstrap.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0041_fix_policy_models_schema.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0041_fix_policy_models_schema.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0042_repair_jurisdiction_profiles.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0042_repair_jurisdiction_profiles.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0043_make_jp_legacy_nullable.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0043_make_jp_legacy_nullable.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0044_fix_jp_created_at_default.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0044_fix_jp_created_at_default.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0045_add_policy_sources_and_assertions.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0045_add_policy_sources_and_assertions.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0046_policy_governance_and_coverage.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0046_policy_governance_and_coverage.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0047_property_state_stage_index_and_transition_ts.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0047_property_state_stage_index_and_transition_ts.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0048_add_properties_updated_at.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0048_add_properties_updated_at.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0049_add_deal_pipeline_fields.py",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0049_add_deal_pipeline_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0050_add_property_photos.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0050_add_property_photos.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0051_add_policy_catalog_entries.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0051_add_policy_catalog_entries.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0052_add_ingestion_tables.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0052_add_ingestion_tables.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0053_add_seen_columns_to_ingestion_record_links.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0053_add_seen_columns_to_ingestion_record_links.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0054_add_location_automation_foundation.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0054_add_location_automation_foundation.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0055_add_jurisdiction_finalize_foundation.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0055_add_jurisdiction_finalize_foundation.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0056_add_real_inspection_compliance_foundation.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0056_add_real_inspection_compliance_foundation.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0057_add_is_authoritative_to_policy_sources.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0057_add_is_authoritative_to_policy_sources.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0058_add_org_locks.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0058_add_org_locks.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0059_add_inventory_and_pane_snapshot_tables.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0059_add_inventory_and_pane_snapshot_tables.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0060_add_acquisition_workflow_tables.py",
+      "priority": "low",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0060_add_acquisition_workflow_tables.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0061_add_acquisition_search_and_tagging.py",
+      "priority": "low",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0061_add_acquisition_search_and_tagging.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0062_add_acquisition_document_workflow_engine.py",
+      "priority": "low",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0062_add_acquisition_document_workflow_engine.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0063_add_market_sync_states.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0063_add_market_sync_states.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0064_fix_org_locks_schema_for_dataset_locks.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0064_fix_org_locks_schema_for_dataset_locks.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0065_widen_property_acquisition_source_columns.py",
+      "priority": "low",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0065_widen_property_acquisition_source_columns.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0066_add_property_listing_visibility_fields.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0066_add_property_listing_visibility_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0067_add_productionized_crime_risk_fields.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0067_add_productionized_crime_risk_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0068_add_property_tax_insurance_fields.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0068_add_property_tax_insurance_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0069_add_property_tax_lookup_metadata.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0069_add_property_tax_lookup_metadata.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0070_repair_acquisition_contacts_columns.py",
+      "priority": "low",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0070_repair_acquisition_contacts_columns.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0071_add_property_scoped_inspection_execution_fields.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0071_add_property_scoped_inspection_execution_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0072_add_inspection_appointment_fields_and_reminders.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0072_add_inspection_appointment_fields_and_reminders.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0073_add_compliance_documents.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0073_add_compliance_documents.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0074_add_compliance_rule_projection_foundation.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0074_add_compliance_rule_projection_foundation.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0075_expand_policy_foundation_for_trustworthy_projection.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0075_expand_policy_foundation_for_trustworthy_projection.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0076_add_property_evidence_proof_fields.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0076_add_property_evidence_proof_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0077_add_jurisdiction_completeness_metadata_fields.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0077_add_jurisdiction_completeness_metadata_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0078_add_policy_source_authority_tiering_fields.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0078_add_policy_source_authority_tiering_fields.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0079_add_policy_source_inventory_foundation.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0079_add_policy_source_inventory_foundation.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0080_add_policy_refresh_state_machine.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0080_add_policy_refresh_state_machine.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0081_add_policy_assertion_validation_gate.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0081_add_policy_assertion_validation_gate.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0082_add_policy_override_ledger.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0082_add_policy_override_ledger.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0083_repair_jurisdiction_schema_drift.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0083_repair_jurisdiction_schema_drift.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0084_repair_remaining_jurisdiction_schema_drift.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0084_repair_remaining_jurisdiction_schema_drift.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0085_fix_jurisdiction_json_default_casts.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0085_fix_jurisdiction_json_default_casts.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0086_add_projection_item_updated_at.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0086_add_projection_item_updated_at.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0087_fix_hqs_rules_schema_drift.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0087_fix_hqs_rules_schema_drift.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0088_add_jurisdiction_registry_and_source_families.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0088_add_jurisdiction_registry_and_source_families.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0089_add_nspire_rule_catalog.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0089_add_nspire_rule_catalog.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0090_add_property_compliance_resolution_snapshots.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0090_add_property_compliance_resolution_snapshots.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0091_add_jurisdiction_registry.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0091_add_jurisdiction_registry.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/alembic/versions/0092_add_registry_completeness_metadata.py",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/alembic",
+      "filename": "0092_add_registry_completeness_metadata.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/data/crime/README.md",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/data",
+      "filename": "README.md"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/apply.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "apply.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/contracts.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "contracts.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/executor.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "executor.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/llm_router.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "llm_router.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/registry.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "registry.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/run_service.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "run_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/validate.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "validate.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/checklist_templates.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "checklist_templates.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/compliance_completion.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "compliance_completion.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/compliance_stats.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "compliance_stats.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "hqs.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs_library.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "hqs_library.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_mapping.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "inspection_mapping.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_rules.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "inspection_rules.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/photo_to_hqs_mapper.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "photo_to_hqs_mapper.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/top_fail_points.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "top_fail_points.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/__init__.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/base.py",
+      "priority": "medium",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "base.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/investorlift.py",
+      "priority": "medium",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "investorlift.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/zillow.py",
+      "priority": "medium",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "zillow.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/__init__.py",
+      "priority": "medium",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/authority.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "authority.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/categories.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "categories.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/conflicts.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "conflicts.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/decisions.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "decisions.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/defaults.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "defaults.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/evidence.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "evidence.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/expected_universe.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "expected_universe.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/materiality.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "materiality.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/__init__.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/section8/rent_rules.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "rent_rules.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/shared/__init__.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/workflow/panes.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "panes.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/workflow/stages.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "stages.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/deal_intake.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "deal_intake.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "hqs_precheck_agent.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/next_actions_agent.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "next_actions_agent.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/ops_judge.py",
+      "priority": "medium",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "ops_judge.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/packet_builder_agent.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "packet_builder_agent.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/photo_rehab_agent.py",
+      "priority": "medium",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "photo_rehab_agent.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/public_records_check.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "public_records_check.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "rent_reasonableness_agent.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/timeline_nudger.py",
+      "priority": "medium",
+      "owner_hint": "platform",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "timeline_nudger.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/underwrite_agent.py",
+      "priority": "medium",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/domain",
+      "filename": "underwrite_agent.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/__init__.py",
+      "priority": "low",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "compliance_document_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_photo_analysis_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "compliance_photo_analysis_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "compliance_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "property_compliance_resolution_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "workflow_gate_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/__init__.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "pipeline_service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/__init__.py",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/products",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/shared/__init__.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/base.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "base.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/cache.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "cache.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/fallbacks.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "fallbacks.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/registry.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "registry.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/service.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "service.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/__init__.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/bsa_adapter.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "bsa_adapter.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/county_rate_adapter.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "county_rate_adapter.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/public_record_adapter.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "public_record_adapter.py"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/__init__.py",
+      "priority": "medium",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/backend/app",
+      "prefix4": "onehaven_decision_engine/backend/app/services",
+      "filename": "__init__.py"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/App.tsx",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/App.tsx",
+      "filename": "App.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/main.tsx",
+      "priority": "high",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/main.tsx",
+      "filename": "main.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/styles.css",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/styles.css",
+      "filename": "styles.css"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AgentRunCompare.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AgentRunHistory.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AgentRunsPanel.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AgentSlots.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AnimatedBackdrop.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AppFooter.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AppHeader.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AppSelect.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AppShell.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Artwork.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "Artwork.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AuroraBackground.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "AuroraBackground.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/EmptyState.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "EmptyState.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/FilterBar.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "FilterBar.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlassCard.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "GlassCard.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "GlobalFilters.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "Golem.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "IngestionErrorsDrawer.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "IngestionLaunchCard.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "IngestionRunsPanel.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionSourcesPanel.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "IngestionSourcesPanel.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/KpiCard.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "KpiCard.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/MarketSourcePackModal.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "MarketSourcePackModal.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageHero.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "PageHero.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageShell.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "PageShell.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PaneSwitcher.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "PaneSwitcher.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/RehabFromPhotosCTA.tsx",
+      "priority": "medium",
+      "owner_hint": "ops",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "RehabFromPhotosCTA.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "Shell.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Spinner.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "Spinner.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatCard.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "StatCard.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatPill.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "StatPill.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Surface.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "Surface.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/VirtualList.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_component",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/components",
+      "filename": "VirtualList.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/lib/api.ts",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/lib",
+      "filename": "api.ts"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/lib/auth.tsx",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/lib",
+      "filename": "auth.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/lib/authFlow.ts",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/lib",
+      "filename": "authFlow.ts"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/lib/dealRules.ts",
+      "priority": "low",
+      "owner_hint": "intelligence",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/lib",
+      "filename": "dealRules.ts"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/lib/filters.ts",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/lib",
+      "filename": "filters.ts"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/lib/ingestionClient.ts",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/lib",
+      "filename": "ingestionClient.ts"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_page",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "Agents.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_page",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "AgentsPanel.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_page",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "Constitution.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "priority": "medium",
+      "owner_hint": "acquire",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "ImportsPage.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "JurisdictionProfiles.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+      "priority": "medium",
+      "owner_hint": "compliance",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "Jurisdictions.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_page",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "Login.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_page",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "PolicyReview.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_page",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "Property.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Register.tsx",
+      "priority": "medium",
+      "owner_hint": "frontend_page",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "Register.tsx"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/styles/globals.css",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/styles",
+      "filename": "globals.css"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/styles/motion.css",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/styles",
+      "filename": "motion.css"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/styles/tokens.css",
+      "priority": "low",
+      "owner_hint": "unclear",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/styles",
+      "filename": "tokens.css"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/drilldowns/README_STEP8_AUDIT.md",
+      "priority": "medium",
+      "owner_hint": "frontend_page",
+      "prefix3": "onehaven_decision_engine/frontend/src",
+      "prefix4": "onehaven_decision_engine/frontend/src/pages",
+      "filename": "README_STEP8_AUDIT.md"
+    }
+  ]
+}

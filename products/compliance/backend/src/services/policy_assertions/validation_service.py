@@ -9,10 +9,10 @@ from datetime import datetime
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import expected_rule_universe_for_scope, normalize_category
-from app.policy_models import PolicyAssertion, PolicySource, PolicySourceInventory
-from app.services.policy_change_detection_service import compute_next_retry_due, determine_validation_refresh_state
-from app.products.compliance.services.policy_sources.source_service import _is_official_host
+from onehaven_platform.backend.src.domain.policy.categories import expected_rule_universe_for_scope, normalize_category
+from onehaven_platform.backend.src.policy_models import PolicyAssertion, PolicySource, PolicySourceInventory
+from products.compliance.backend.src.services.policy_change_detection_service import compute_next_retry_due, determine_validation_refresh_state
+from products.compliance.backend.src.services.policy_sources.source_service import _is_official_host
 
 
 VALIDATION_STATE_VALIDATED = "validated"

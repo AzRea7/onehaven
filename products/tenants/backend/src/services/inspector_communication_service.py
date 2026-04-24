@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Inspection, Property
+from onehaven_platform.backend.src.models import Inspection, Property
 
 
 def _must_get_inspection(db: Session, *, org_id: int, inspection_id: int) -> Inspection:

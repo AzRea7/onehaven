@@ -1,0 +1,3274 @@
+{
+  "phase": 12,
+  "product": "compliance",
+  "legacy_hit_count": 544,
+  "legacy_hits": [
+    {
+      "file": "onehaven_decision_engine/scripts/restructure.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 303
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/agents.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 26
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 33
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/photos.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/photos.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/workflow.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 18
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/ingestion_enrichment_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 753
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/ingestion_scheduler_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/jurisdiction_profile_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 659
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/photo_rehab_agent.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/policy_crawl_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/policy_crawl_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 144
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/policy_crawl_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 145
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/tasks/ingestion_tasks.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 34
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/tasks/ingestion_tasks.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 35
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/tasks/jurisdiction_tasks.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/tasks/jurisdiction_tasks.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 12
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/tasks/jurisdiction_tasks.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 13
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/compliance/compliance_completion.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 55
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/compliance/hqs_library.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 110
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 33
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 39
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 47
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 51
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 57
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 62
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 70
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 36
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 38
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 42
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 59
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1079
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1095
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 23
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 24
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 25
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 26
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1399
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdiction_profiles.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/jurisdiction_profiles.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 543
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 18
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 25
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 29
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 36
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 41
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 45
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 52
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 58
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 521
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1618
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 2568
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_catalog_admin.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_catalog_admin.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_catalog_admin.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 20
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_catalog_admin.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 643
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_evidence.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 54
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/policy_evidence.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 126
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_document_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 24
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 28
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 32
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 38
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 43
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 44
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1672
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/property_compliance_resolution_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 21
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 10
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 12
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 13
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/failure_task_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 436
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/readiness_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/inspections/readiness_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 53
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/cleanup_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 7
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/cleanup_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/extractor_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_assertions/validation_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/completeness_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 684
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/coverage_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/coverage_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 32
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/coverage_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 33
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/coverage_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 34
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/health_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/health_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 12
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/health_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 13
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_coverage/health_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/notification_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 12
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 25
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 26
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 27
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1239
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1240
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1241
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1242
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1365
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1366
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1367
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 13
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 21
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 24
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 27
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 28
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 32
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 34
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 39
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 43
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 44
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 48
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 52
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 60
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 67
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 68
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/crawl_inventory_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/crawl_inventory_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/dataset_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/source_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/source_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 23
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/source_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 45
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/policy_sources/source_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1576
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/routers/cash.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/routers/equity.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/deal_intelligence_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 64
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 65
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 66
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 20
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 21
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/state_machine.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 36
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/state_machine.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 38
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/tenant/routers/tenants.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 20
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/files/photos.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/files/photos.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/jobs/ingestion_scheduler_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 34
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 35
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/workflow/workflow.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 18
+    },
+    {
+      "file": "products/compliance/backend/src/domain/compliance_completion.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 55
+    },
+    {
+      "file": "products/compliance/backend/src/domain/hqs_library.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 110
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 33
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 39
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 47
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 51
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 57
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 62
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 70
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 36
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 38
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 42
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 59
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1079
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1095
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 19
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 23
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 24
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 25
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 26
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdictions.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1399
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "products/compliance/backend/src/routers/jurisdiction_profiles.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 543
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 18
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 19
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 25
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 29
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 36
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 41
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 45
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 52
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 58
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 521
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1618
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 2568
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_catalog_admin.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_catalog_admin.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 15
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_catalog_admin.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 20
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_catalog_admin.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 643
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_evidence.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 54
+    },
+    {
+      "file": "products/compliance/backend/src/routers/policy_evidence.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 126
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_document_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 24
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 28
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 32
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 38
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 43
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 44
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1672
+    },
+    {
+      "file": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 659
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_crawl_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_crawl_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 144
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_crawl_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 145
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "products/compliance/backend/src/services/property_compliance_resolution_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 21
+    },
+    {
+      "file": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 15
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 10
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 12
+    },
+    {
+      "file": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 13
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/failure_task_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 436
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "products/compliance/backend/src/services/inspections/readiness_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 53
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/cleanup_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 7
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/cleanup_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/extractor_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_assertions/validation_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 15
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/completeness_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 684
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 32
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 33
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/coverage_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 34
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 12
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 13
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_coverage/health_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/notification_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 12
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 25
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 26
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 27
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1239
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1240
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1241
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1242
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1365
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1366
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_governance/refresh_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1367
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 13
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 17
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 21
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 24
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 27
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 28
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 32
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 34
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 39
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 43
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 44
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 48
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 52
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 60
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 67
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_pipeline/pipeline_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 68
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/crawl_inventory_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 11
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/crawl_inventory_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 15
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/dataset_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 16
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/source_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 14
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/source_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 23
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/source_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 45
+    },
+    {
+      "file": "products/compliance/backend/src/services/policy_sources/source_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1576
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 19
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 19
+    },
+    {
+      "file": "products/intelligence/backend/src/services/deal_intelligence_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 9
+    },
+    {
+      "file": "products/ops/backend/src/routers/ops.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 33
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 64
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 65
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 66
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 20
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 21
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/state_machine.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 36
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/state_machine.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 38
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 20
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 12
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 18
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 24
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 30
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 36
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 42
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 48
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 54
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 60
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 66
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 72
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 78
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 84
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 90
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 96
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 102
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 108
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 114
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 120
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 126
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 132
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 138
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 144
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 150
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 156
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 162
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 168
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 174
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 180
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 186
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 192
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 198
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 204
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 210
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 216
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 222
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 228
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 234
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 240
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 246
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 252
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 258
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 264
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 270
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 276
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 282
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 288
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 294
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 300
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 306
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 312
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 318
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 324
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 330
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 336
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 342
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 348
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 354
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 360
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 366
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 372
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 378
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 384
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 390
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 396
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 402
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 408
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 414
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 420
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 426
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 432
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 438
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 444
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 450
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 456
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 462
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 468
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 474
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 480
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 486
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 492
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 498
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 504
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 510
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 516
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 522
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 528
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 534
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 540
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 546
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 552
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 558
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 564
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 570
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 576
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 582
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 588
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 594
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 600
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 606
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 612
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 618
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 624
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 630
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 636
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 642
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 648
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 654
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 660
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 666
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 672
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 678
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 684
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 690
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 696
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 702
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 708
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 714
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 720
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 726
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 732
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 738
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 744
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 750
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 756
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 762
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 768
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 774
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 780
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 786
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 792
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 798
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 804
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 810
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 816
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 822
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 828
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 834
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 840
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 846
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 852
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 858
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 864
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 870
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 876
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 882
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 888
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 894
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 900
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 906
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 912
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 918
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 924
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 930
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 936
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 942
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 948
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 954
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 960
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 966
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 972
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 978
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 984
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 990
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 996
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1002
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1008
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1014
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1020
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1026
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1032
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1038
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1044
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1050
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1056
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1062
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1068
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1074
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1080
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1086
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1092
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1098
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1104
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1110
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1116
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1122
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1128
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1134
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1140
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1146
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1152
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1158
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1164
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1170
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1176
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1182
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1188
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1194
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1200
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1206
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1212
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1218
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1224
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1230
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1236
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1242
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1248
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1254
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1260
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1266
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1272
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1278
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1284
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1290
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1296
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1302
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1308
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1314
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1320
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1326
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1332
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1338
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1344
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1350
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1356
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1362
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1368
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1374
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1380
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1386
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1392
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1398
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1404
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1410
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1416
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1422
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1428
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1434
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1440
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1446
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1452
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1458
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1464
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1470
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1476
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1482
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1488
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1494
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1500
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1506
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1512
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1518
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1524
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1530
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1536
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1542
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1548
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1554
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1560
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1566
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1572
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1578
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1584
+    },
+    {
+      "file": "tools/repo/compliance-validation-report.json",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 1590
+    },
+    {
+      "file": "tools/repo/validate_product_backend_refs_phase12.py",
+      "type": "legacy_backend_mod",
+      "match": "backend.app.products.compliance",
+      "line": 30
+    },
+    {
+      "file": "tools/repo/validate_product_backend_refs_phase12.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 30
+    },
+    {
+      "file": "tools/repo/validate_product_backend_refs_phase12.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 31
+    },
+    {
+      "file": "tools/repo/validate_product_migration.py",
+      "type": "legacy_backend_mod_alt",
+      "match": "app.products.compliance",
+      "line": 40
+    }
+  ],
+  "legacy_backend_dir_exists": true,
+  "new_backend_dir_exists": true,
+  "status": "needs_attention"
+}

@@ -1,0 +1,159 @@
+{
+  "phase": 68,
+  "summary": {
+    "total": 21,
+    "platform": 16,
+    "acquire": 4,
+    "compliance": 1,
+    "manual_review": 0
+  },
+  "plans": [
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AuroraBackground.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/EmptyState.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/EmptyState.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/FilterBar.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/FilterBar.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlassCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/GlassCard.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/GlobalFilters.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Golem.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "owner": "acquire",
+      "confidence": "high",
+      "reason": "manual_acquire_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionLaunchCard.tsx",
+      "owner": "acquire",
+      "confidence": "high",
+      "reason": "manual_acquire_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionRunsPanel.tsx",
+      "owner": "acquire",
+      "confidence": "high",
+      "reason": "manual_acquire_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionSourcesPanel.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionSourcesPanel.tsx",
+      "owner": "acquire",
+      "confidence": "high",
+      "reason": "manual_acquire_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/KpiCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/KpiCard.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/MarketSourcePackModal.tsx",
+      "target": "products/compliance/frontend/src/components/MarketSourcePackModal.tsx",
+      "owner": "compliance",
+      "confidence": "medium",
+      "reason": "manual_compliance_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageHero.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PageHero.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageShell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PageShell.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PaneSwitcher.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PaneSwitcher.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Shell.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Spinner.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Spinner.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/StatCard.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatPill.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/StatPill.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Surface.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Surface.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/VirtualList.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/VirtualList.tsx",
+      "owner": "platform",
+      "confidence": "high",
+      "reason": "manual_platform_exact"
+    }
+  ]
+}

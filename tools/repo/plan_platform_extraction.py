@@ -15,14 +15,14 @@ PRODUCT_DIRS = {
 }
 
 LIKELY_PLATFORM_DIRS = {
-    "backend/app/auth.py": "platform/backend/src/identity/interfaces",
-    "backend/app/config.py": "platform/backend/src/config",
-    "backend/app/db.py": "platform/backend/src/db",
-    "backend/app/logging_config.py": "platform/backend/src/observability",
-    "backend/app/middleware": "platform/backend/src/observability",
-    "backend/app/routers/auth.py": "platform/backend/src/identity/interfaces",
+    "backend/app/auth.py": "onehaven_onehaven_platform/backend/src/identity/interfaces",
+    "backend/app/config.py": "onehaven_onehaven_platform/backend/src/config",
+    "backend/app/db.py": "onehaven_onehaven_platform/backend/src/db",
+    "backend/app/logging_config.py": "onehaven_onehaven_platform/backend/src/observability",
+    "backend/app/middleware": "onehaven_onehaven_platform/backend/src/observability",
+    "backend/app/routers/auth.py": "onehaven_onehaven_platform/backend/src/identity/interfaces",
     "backend/app/routers/health.py": "apps/suite-api/app/api/health",
-    "frontend/src/lib/auth.tsx": "platform/frontend/src/auth",
+    "frontend/src/lib/auth.tsx": "onehaven_onehaven_platform/frontend/src/auth",
 }
 
 MANUAL_SPLIT_HINTS = [

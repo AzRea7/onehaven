@@ -1,0 +1,75 @@
+{
+  "phase": 29,
+  "area": "components",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 9,
+  "would_move_count": 0,
+  "moved_count": 0,
+  "skipped_count": 9,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceDocumentStack.tsx",
+      "target": "products/compliance/frontend/src/components/ComplianceDocumentStack.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceDocumentUploader.tsx",
+      "target": "products/compliance/frontend/src/components/ComplianceDocumentUploader.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/CompliancePhotoFindingsPanel.tsx",
+      "target": "products/compliance/frontend/src/components/CompliancePhotoFindingsPanel.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/ComplianceReminderPanel.tsx",
+      "target": "products/compliance/frontend/src/components/ComplianceReminderPanel.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionReadiness.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionReadiness.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionSchedulerModal.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionSchedulerModal.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/InspectionTimelineCard.tsx",
+      "target": "products/compliance/frontend/src/components/InspectionTimelineCard.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/JurisdictionCoverageBadge.tsx",
+      "target": "products/compliance/frontend/src/components/JurisdictionCoverageBadge.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/products/compliance/components/PropertyJurisdictionRulesPanel.tsx",
+      "target": "products/compliance/frontend/src/components/PropertyJurisdictionRulesPanel.tsx",
+      "area": "components",
+      "status": "skipped",
+      "reason": "target_exists"
+    }
+  ]
+}

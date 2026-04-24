@@ -1,0 +1,14 @@
+{
+  "phase": 14,
+  "product": "tenants",
+  "dry_run": false,
+  "legacy_backend_dir": "onehaven_decision_engine/backend/app/products/tenant",
+  "new_backend_dir": "products/tenants/backend/src",
+  "legacy_backend_exists_before": true,
+  "legacy_backend_file_count_before": 9,
+  "new_backend_file_count": 9,
+  "backup_path": "tools/repo/_phase14_backups/tenants_20260423_133425",
+  "removed": true,
+  "status": "success",
+  "legacy_backend_exists_after": false
+}

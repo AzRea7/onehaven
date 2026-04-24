@@ -1,0 +1,9 @@
+{
+  "phase": 12,
+  "product": "tenants",
+  "legacy_hit_count": 0,
+  "legacy_hits": [],
+  "legacy_backend_dir_exists": true,
+  "new_backend_dir_exists": true,
+  "status": "success"
+}

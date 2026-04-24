@@ -8,17 +8,17 @@ from typing import Any, Optional
 from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.domain.underwriting import compute_trustworthy_investment_metrics, compute_monthly_housing_costs
-from app.services.property_tax_enrichment_service import get_property_tax_context
-from app.services.property_insurance_enrichment_service import get_property_insurance_context
-from app.models import Deal, RentAssumption, Property, UnderwritingResult
-from app.products.management.services.properties.state_machine import get_state_payload
-from app.products.investor_intelligence.services.risk_scoring import compute_risk_adjusted_score
-from app.services.runtime_metrics import METRICS
+from onehaven_platform.backend.src.config import settings
+from products.intelligence.backend.src.domain.underwriting import compute_trustworthy_investment_metrics, compute_monthly_housing_costs
+from products.intelligence.backend.src.services.property_tax_enrichment_service import get_property_tax_context
+from products.intelligence.backend.src.services.property_insurance_enrichment_service import get_property_insurance_context
+from onehaven_platform.backend.src.models import Deal, RentAssumption, Property, UnderwritingResult
+from onehaven_platform.backend.src.services.state_machine_service import get_state_payload
+from products.intelligence.backend.src.services.risk_scoring import compute_risk_adjusted_score
+from onehaven_platform.backend.src.observability.runtime_metrics import METRICS
 from products.acquire.backend.src.services.acquisition_tag_service import list_tags_for_properties
-from app.products.compliance.services.compliance_engine.projection_service import build_property_projection_snapshot
-from app.products.compliance.services.workflow_gate_service import build_property_jurisdiction_blocker
+from onehaven_platform.backend.src.services.compliance_projection_service import build_property_projection_snapshot
+from onehaven_platform.backend.src.services.compliance_projection_service import build_property_jurisdiction_blocker
 
 log = logging.getLogger("onehaven.inventory_snapshot")
 

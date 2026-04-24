@@ -1,0 +1,989 @@
+{
+  "phase": 78,
+  "dry_run": false,
+  "summary": {
+    "would_remove": 0,
+    "removed": 157,
+    "skipped": 6
+  },
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/services/address_normalization.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/address_normalization.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_actions.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_actions.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_concurrency.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_concurrency.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_engine.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_engine.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_orchestrator.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_orchestrator_runtime.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_orchestrator_runtime.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_threads.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_threads.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/agent_trace.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/agent_trace.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/auth_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/auth_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/budget_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/budget_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/crime_index.py",
+      "target": "products/intelligence/backend/src/services/crime_index.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/csv_import_mapping_service.py",
+      "target": "products/acquire/backend/src/services/csv_import_mapping_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/events_facade.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/events_facade.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/external_budget.py",
+      "target": "products/intelligence/backend/src/services/external_budget.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/fmr.py",
+      "target": "products/intelligence/backend/src/services/fmr.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/hud_fmr_service.py",
+      "target": "products/intelligence/backend/src/services/hud_fmr_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_dedupe_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_dedupe_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_enrichment_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_enrichment_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_execute.py",
+      "target": "products/acquire/backend/src/services/ingestion_run_execute.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_run_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_run_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_scheduler_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_scheduler_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ingestion_source_service.py",
+      "target": "products/acquire/backend/src/services/ingestion_source_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspection_scheduling_service.py",
+      "target": "products/compliance/backend/src/services/inspection_scheduling_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/inspector_communication_service.py",
+      "target": "products/compliance/backend/src/services/inspector_communication_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_profile_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_profile_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_registry_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_registry_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_source_family_service.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_source_family_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/jurisdiction_task_mapper.py",
+      "target": "products/compliance/backend/src/services/jurisdiction_task_mapper.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/lease_rules.py",
+      "target": "products/tenants/backend/src/services/lease_rules.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/locks_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/locks_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_catalog_service.py",
+      "target": "products/intelligence/backend/src/services/market_catalog_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/market_sync_service.py",
+      "target": "products/intelligence/backend/src/services/market_sync_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/offender_index.py",
+      "target": "products/intelligence/backend/src/services/offender_index.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/onboarding_flows.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/onboarding_flows.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/ownership.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/ownership.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/pane_routing_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/pane_routing_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/photo_rehab_agent.py",
+      "target": "products/ops/backend/src/services/photo_rehab_agent.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/plan_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/plan_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_catalog.py",
+      "target": "products/compliance/backend/src/services/policy_catalog.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_change_detection_service.py",
+      "target": "products/compliance/backend/src/services/policy_change_detection_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_crawl_service.py",
+      "target": "products/compliance/backend/src/services/policy_crawl_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_service.py",
+      "target": "products/compliance/backend/src/services/policy_evidence_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_evidence_version_service.py",
+      "target": "products/compliance/backend/src/services/policy_evidence_version_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_market_seed_service.py",
+      "target": "products/compliance/backend/src/services/policy_market_seed_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_rule_normalizer.py",
+      "target": "products/compliance/backend/src/services/policy_rule_normalizer.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/policy_seed.py",
+      "target": "products/compliance/backend/src/services/policy_seed.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_ingestion_service.py",
+      "target": "products/acquire/backend/src/services/portfolio_ingestion_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/portfolio_watchlist_service.py",
+      "target": "products/intelligence/backend/src/services/portfolio_watchlist_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_ingestion_router_service.py",
+      "target": "products/acquire/backend/src/services/product_ingestion_router_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/product_surfaces.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/product_surfaces.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_insurance_enrichment_service.py",
+      "target": "products/intelligence/backend/src/services/property_insurance_enrichment_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_photo_service.py",
+      "target": "products/ops/backend/src/services/property_photo_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_price_resolution_service.py",
+      "target": "products/intelligence/backend/src/services/property_price_resolution_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_tax_enrichment_service.py",
+      "target": "products/intelligence/backend/src/services/property_tax_enrichment_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/public_tax_lookup_service.py",
+      "target": "products/intelligence/backend/src/services/public_tax_lookup_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_comp_selection.py",
+      "target": "products/intelligence/backend/src/services/rent_comp_selection.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rent_refresh_queue_service.py",
+      "target": "products/intelligence/backend/src/services/rent_refresh_queue_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_listing_source.py",
+      "target": "products/intelligence/backend/src/services/rentcast_listing_source.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/rentcast_service.py",
+      "target": "products/intelligence/backend/src/services/rentcast_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/runtime_metrics.py",
+      "target": "onehaven_onehaven_platform/backend/src/observability/runtime_metrics.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "target": "products/ops/backend/src/services/stage_guard.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/trust_service.py",
+      "target": "products/compliance/backend/src/services/trust_service.py",
+      "status": "skipped",
+      "reason": "different"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/usage_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/usage_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/virus_scanning_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/services/virus_scanning_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/zillow_api_source.py",
+      "target": "products/intelligence/backend/src/services/zillow_api_source.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/zillow_photo_source.py",
+      "target": "products/intelligence/backend/src/services/zillow_photo_source.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "status": "skipped",
+      "reason": "target_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/apply.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/apply.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/contracts.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/contracts.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/executor.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/executor.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/deal_intake.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/deal_intake.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/hqs_precheck_agent.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/next_actions_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/next_actions_agent.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/ops_judge.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/ops_judge.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/packet_builder_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/packet_builder_agent.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/photo_rehab_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/photo_rehab_agent.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/public_records_check.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/public_records_check.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/rent_reasonableness_agent.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/timeline_nudger.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/timeline_nudger.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/impl/underwrite_agent.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/impl/underwrite_agent.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/llm_router.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/llm_router.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/registry.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/registry.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/run_service.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/run_service.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/agents/validate.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/agents/validate.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/audit.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/audit.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/cashflow.py",
+      "target": "products/intelligence/backend/src/domain/cashflow.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "status": "skipped",
+      "reason": "target_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/checklist_templates.py",
+      "target": "products/compliance/backend/src/domain/compliance/checklist_templates.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/compliance_completion.py",
+      "target": "products/compliance/backend/src/domain/compliance/compliance_completion.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/compliance_stats.py",
+      "target": "products/compliance/backend/src/domain/compliance/compliance_stats.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs.py",
+      "target": "products/compliance/backend/src/domain/compliance/hqs.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/hqs_library.py",
+      "target": "products/compliance/backend/src/domain/compliance/hqs_library.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_mapping.py",
+      "target": "products/compliance/backend/src/domain/compliance/inspection_mapping.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/inspection_rules.py",
+      "target": "products/compliance/backend/src/domain/compliance/inspection_rules.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/photo_to_hqs_mapper.py",
+      "target": "products/compliance/backend/src/domain/compliance/photo_to_hqs_mapper.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance/top_fail_points.py",
+      "target": "products/compliance/backend/src/domain/compliance/top_fail_points.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/compliance.py",
+      "target": "products/compliance/backend/src/domain/compliance.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/decision_engine.py",
+      "target": "products/intelligence/backend/src/domain/decision_engine.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/events.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/events.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/fingerprint.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/fingerprint.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "status": "skipped",
+      "reason": "target_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/base.py",
+      "target": "products/intelligence/backend/src/domain/importers/base.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/investorlift.py",
+      "target": "products/intelligence/backend/src/domain/importers/investorlift.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/importers/zillow.py",
+      "target": "products/intelligence/backend/src/domain/importers/zillow.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/jurisdiction_scoring.py",
+      "target": "products/compliance/backend/src/domain/jurisdiction_scoring.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/operating_truth.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/operating_truth_enforcement.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/operating_truth_enforcement.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "status": "skipped",
+      "reason": "target_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/authority.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/authority.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/categories.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/categories.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/conflicts.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/conflicts.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/decisions.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/decisions.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/defaults.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/defaults.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/evidence.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/evidence.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/expected_universe.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/expected_universe.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/policy/materiality.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/policy/materiality.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_explain_runs.py",
+      "target": "products/intelligence/backend/src/domain/rent_explain_runs.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/rent_learning.py",
+      "target": "products/intelligence/backend/src/domain/rent_learning.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/shared/__init__.py",
+      "target": "onehaven_onehaven_platform/backend/src/domain/__init__.py",
+      "status": "skipped",
+      "reason": "target_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/underwriting.py",
+      "target": "products/intelligence/backend/src/domain/underwriting.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/domain/valuation_cadence.py",
+      "target": "products/intelligence/backend/src/domain/valuation_cadence.py",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunCompare.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AgentRunCompare.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunHistory.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AgentRunHistory.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentRunsPanel.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AgentRunsPanel.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AgentSlots.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AgentSlots.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AnimatedBackdrop.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AnimatedBackdrop.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppFooter.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AppFooter.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppHeader.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AppHeader.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppSelect.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AppSelect.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AppShell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AppShell.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Artwork.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Artwork.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/RehabFromPhotosCTA.tsx",
+      "target": "products/ops/frontend/src/components/RehabFromPhotosCTA.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/AuroraBackground.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/AuroraBackground.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/EmptyState.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/EmptyState.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/FilterBar.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/FilterBar.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlassCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/GlassCard.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/GlobalFilters.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/GlobalFilters.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Golem.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Golem.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionErrorsDrawer.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionLaunchCard.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionLaunchCard.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionRunsPanel.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionRunsPanel.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/IngestionSourcesPanel.tsx",
+      "target": "products/acquire/frontend/src/components/IngestionSourcesPanel.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/KpiCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/KpiCard.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/MarketSourcePackModal.tsx",
+      "target": "products/compliance/frontend/src/components/MarketSourcePackModal.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageHero.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PageHero.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PageShell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PageShell.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/PaneSwitcher.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/PaneSwitcher.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Shell.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Shell.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Spinner.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Spinner.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatCard.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/StatCard.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/StatPill.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/StatPill.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/Surface.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/Surface.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/components/VirtualList.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/components/VirtualList.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Agents.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Agents.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/AgentsPanel.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/AgentsPanel.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Constitution.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Constitution.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "target": "products/acquire/frontend/src/pages/ImportsPage.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx",
+      "target": "products/compliance/frontend/src/pages/JurisdictionProfiles.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Jurisdictions.tsx",
+      "target": "products/compliance/frontend/src/pages/Jurisdictions.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Login.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Login.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "target": "products/compliance/frontend/src/pages/PolicyReview.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "target": "products/ops/frontend/src/pages/Property.tsx",
+      "status": "removed",
+      "reason": "identical"
+    },
+    {
+      "source": "onehaven_decision_engine/frontend/src/pages/Register.tsx",
+      "target": "onehaven_onehaven_platform/frontend/src/pages/Register.tsx",
+      "status": "removed",
+      "reason": "identical"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "phase": 9,
+  "description": "Rewrite imports for moved platform files",
+  "dry_run": false,
+  "rule_count": 59,
+  "rewrite_file_count": 0,
+  "rewrites": []
+}

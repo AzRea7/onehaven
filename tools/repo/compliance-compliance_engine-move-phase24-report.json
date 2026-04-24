@@ -1,0 +1,40 @@
+{
+  "phase": 24,
+  "lane": "compliance_engine",
+  "dry_run": false,
+  "remove_legacy": false,
+  "candidate_count": 4,
+  "would_move_count": 0,
+  "moved_count": 0,
+  "skipped_count": 4,
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/brief_service.py",
+      "target": "products/compliance/backend/src/services/compliance_engine/brief_service.py",
+      "area": "compliance_engine",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/fix_plan_service.py",
+      "target": "products/compliance/backend/src/services/compliance_engine/fix_plan_service.py",
+      "area": "compliance_engine",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/recommendation_service.py",
+      "target": "products/compliance/backend/src/services/compliance_engine/recommendation_service.py",
+      "area": "compliance_engine",
+      "status": "skipped",
+      "reason": "target_exists"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/products/compliance/services/compliance_engine/revenue_risk_service.py",
+      "target": "products/compliance/backend/src/services/compliance_engine/revenue_risk_service.py",
+      "area": "compliance_engine",
+      "status": "skipped",
+      "reason": "target_exists"
+    }
+  ]
+}

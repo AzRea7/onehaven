@@ -1,0 +1,210 @@
+{
+  "phase": 83,
+  "dry_run": false,
+  "force_main": true,
+  "summary": {
+    "would_remove": 0,
+    "removed": 29,
+    "skipped": 4
+  },
+  "results": [
+    {
+      "source": "onehaven_decision_engine/backend/app/auth.py",
+      "target": "onehaven_platform/backend/src/auth.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/clients/govinfo.py",
+      "target": "onehaven_platform/backend/src/integrations/govinfo.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/clients/hud_user.py",
+      "target": "onehaven_platform/backend/src/integrations/hud_user.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/clients/rentcast.py",
+      "target": "onehaven_platform/backend/src/integrations/rentcast.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/config.py",
+      "target": "onehaven_platform/backend/src/config/__init__.py",
+      "status": "skipped",
+      "reason": "source_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/db.py",
+      "target": "onehaven_platform/backend/src/db/__init__.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/integrations/lm_studio_client.py",
+      "target": "onehaven_platform/backend/src/integrations/lm_studio_client.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/logging_config.py",
+      "target": "onehaven_platform/backend/src/logging_config.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/main.py",
+      "target": "apps/suite_api/app/main.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/middleware/request_id.py",
+      "target": "onehaven_platform/backend/src/middleware/request_id.py",
+      "status": "skipped",
+      "reason": "source_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/middleware/structured_logging.py",
+      "target": "onehaven_platform/backend/src/middleware/structured_logging.py",
+      "status": "skipped",
+      "reason": "source_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/models.py",
+      "target": "onehaven_platform/backend/src/models.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/policy_models.py",
+      "target": "onehaven_platform/backend/src/policy_models.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/schemas.py",
+      "target": "onehaven_platform/backend/src/schemas.py",
+      "status": "skipped",
+      "reason": "source_missing"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
+      "target": "onehaven_platform/backend/src/services/geo_enrichment.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocode_cache_service.py",
+      "target": "onehaven_platform/backend/src/services/geocode_cache_service.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/geocoding_service.py",
+      "target": "onehaven_platform/backend/src/services/geocoding_service.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/property_normalization_service.py",
+      "target": "onehaven_platform/backend/src/services/property_normalization_service.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/__init__.py",
+      "target": "onehaven_platform/backend/src/services/tax/__init__.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/bsa_adapter.py",
+      "target": "onehaven_platform/backend/src/services/tax/adapters/bsa_adapter.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/county_rate_adapter.py",
+      "target": "onehaven_platform/backend/src/services/tax/adapters/county_rate_adapter.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/adapters/public_record_adapter.py",
+      "target": "onehaven_platform/backend/src/services/tax/adapters/public_record_adapter.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/base.py",
+      "target": "onehaven_platform/backend/src/services/tax/base.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/cache.py",
+      "target": "onehaven_platform/backend/src/services/tax/cache.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/fallbacks.py",
+      "target": "onehaven_platform/backend/src/services/tax/fallbacks.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/services/tax/service.py",
+      "target": "onehaven_platform/backend/src/services/tax/service.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/tasks/ingestion_tasks.py",
+      "target": "onehaven_platform/backend/src/jobs/ingestion_tasks.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/tasks/jurisdiction_tasks.py",
+      "target": "onehaven_platform/backend/src/jobs/jurisdiction_tasks.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/tasks/market_sync_tasks.py",
+      "target": "onehaven_platform/backend/src/jobs/market_sync_tasks.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/workers/agent_tasks.py",
+      "target": "onehaven_platform/backend/src/jobs/agent_tasks.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/workers/agent_worker.py",
+      "target": "onehaven_platform/backend/src/jobs/agent_worker.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/workers/celery_app.py",
+      "target": "onehaven_platform/backend/src/jobs/celery_app.py",
+      "status": "removed",
+      "reason": "safe"
+    },
+    {
+      "source": "onehaven_decision_engine/backend/app/workers/risk_tasks.py",
+      "target": "onehaven_platform/backend/src/jobs/risk_tasks.py",
+      "status": "removed",
+      "reason": "safe"
+    }
+  ]
+}

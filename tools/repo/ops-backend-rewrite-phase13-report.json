@@ -1,0 +1,500 @@
+{
+  "phase": 13,
+  "product": "ops",
+  "dry_run": false,
+  "phase12_legacy_hit_count_before": 87,
+  "rewrite_file_count": 43,
+  "rewrites": [
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/workflow.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/agent_actions.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/ingestion_enrichment_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/impl/timeline_nudger.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/routers/cash.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/routers/deals.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/routers/equity.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_dashboard_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_summary_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/dashboard.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/dashboard_rollups.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/tenant/routers/tenants.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_onehaven_platform/backend/src/workflow/workflow.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/compliance.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/routers/inspections.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/compliance/backend/src/services/workflow_gate_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/ops.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/dashboard_rollups.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/ops-backend-validate-phase12-report.json",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod_alt",
+          "pattern": "\\bbackend\\.app\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        },
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "86"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/ops-validation-report.json",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "39"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/rewrite_product_backend_imports_phase13.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod_alt",
+          "pattern": "\\bbackend\\.app\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        },
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/validate_product_backend_refs_phase12.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod_alt",
+          "pattern": "\\bbackend\\.app\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        },
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/validate_product_migration.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/_phase6_backups/acquire_20260423_125245/backend/services/acquisition_service.py",
+      "replacements": [
+        {
+          "rule": "legacy_backend_mod",
+          "pattern": "\\bapp\\.products\\.management\\b",
+          "replacement": "products.ops.backend.src",
+          "count": "1"
+        }
+      ]
+    }
+  ]
+}

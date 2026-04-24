@@ -9,61 +9,61 @@
     {
       "file": "onehaven_decision_engine/backend/app/routers/geo.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 15
     },
     {
       "file": "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 19
     },
     {
       "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_dashboard_service.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 21
     },
     {
       "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_summary_snapshot_service.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 8
     },
     {
       "file": "onehaven_decision_engine/backend/app/products/management/routers/dashboard.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 15
     },
     {
       "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 17
     },
     {
       "file": "onehaven_decision_engine/backend/app/products/management/services/properties/state_machine.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 40
     },
     {
       "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 21
     },
     {
       "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 8
     },
     {
       "file": "tools/repo/validate_product_migration.py",
       "type": "legacy_backend_import",
-      "match": "app.products.investor_intelligence",
+      "match": "products.intelligence.backend.src",
       "line": 16
     }
   ],

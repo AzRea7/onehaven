@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from app.config import settings
-from app.policy_models import JurisdictionProfile
+from onehaven_platform.backend.src.config import settings
+from onehaven_platform.backend.src.policy_models import JurisdictionProfile
 
 
 LEGAL_BLOCKING_CATEGORIES = {"registration", "inspection", "occupancy", "lead", "section8", "program_overlay", "safety"}

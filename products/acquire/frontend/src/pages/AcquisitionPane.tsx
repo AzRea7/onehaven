@@ -30,10 +30,10 @@ import DocumentFieldReviewPanel, {
   type MissingDocumentGroup,
   type ReviewDocumentRow,
 } from "products/acquire/frontend/src/components/DocumentFieldReviewPanel";
-import PageHero from "@/components/PageHero";
-import PageShell from "@/components/PageShell";
-import Surface from "@/components/Surface";
-import EmptyState from "@/components/EmptyState";
+import PageHero from "onehaven_onehaven_platform/frontend/src/shell/PageHero";
+import PageShell from "onehaven_onehaven_platform/frontend/src/shell/PageShell";
+import Surface from "packages/ui/onehaven_onehaven_platform/frontend/src/components/Surface";
+import EmptyState from "packages/ui/onehaven_onehaven_platform/frontend/src/components/EmptyState";
 import { api } from "@/lib/api";
 
 type QueueRow = {

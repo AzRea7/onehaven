@@ -1,0 +1,46 @@
+{
+  "phase": 43,
+  "priority": "high",
+  "group_count": 2,
+  "groups": [
+    {
+      "prefix": "onehaven_decision_engine/backend/app/routers",
+      "count": 13,
+      "priority_mix": {
+        "high": 13
+      },
+      "owner_mix": {
+        "unclear": 8,
+        "platform": 1,
+        "acquire": 2,
+        "ops": 1,
+        "intelligence": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/routers/agents.py",
+        "onehaven_decision_engine/backend/app/routers/agent_runs.py",
+        "onehaven_decision_engine/backend/app/routers/api_keys.py",
+        "onehaven_decision_engine/backend/app/routers/auth.py",
+        "onehaven_decision_engine/backend/app/routers/automation.py",
+        "onehaven_decision_engine/backend/app/routers/geo.py",
+        "onehaven_decision_engine/backend/app/routers/health.py",
+        "onehaven_decision_engine/backend/app/routers/imports.py",
+        "onehaven_decision_engine/backend/app/routers/imports_alias.py",
+        "onehaven_decision_engine/backend/app/routers/ingestion.py"
+      ]
+    },
+    {
+      "prefix": "onehaven_decision_engine/backend/app/main.py",
+      "count": 1,
+      "priority_mix": {
+        "high": 1
+      },
+      "owner_mix": {
+        "unclear": 1
+      },
+      "sample_sources": [
+        "onehaven_decision_engine/backend/app/main.py"
+      ]
+    }
+  ]
+}

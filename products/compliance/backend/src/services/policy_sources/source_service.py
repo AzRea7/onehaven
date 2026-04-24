@@ -11,16 +11,16 @@ from urllib.parse import urlparse
 import httpx
 from sqlalchemy import or_, select
 
-from app.products.compliance.services.policy_sources.fetch_service import (
+from products.compliance.backend.src.services.policy_sources.fetch_service import (
     build_fetch_metadata_payload,
     fetch_official_source_with_fallback,
     should_browser_fallback_on_result,
 )
 from sqlalchemy.orm import Session
 
-from app.domain.policy.categories import category_label, expected_rule_universe_for_scope, normalize_categories
-from app.policy_models import PolicyCatalogEntry, PolicySource, PolicySourceVersion
-from app.products.compliance.services.policy_sources.discovery_service import (
+from onehaven_platform.backend.src.domain.policy.categories import category_label, expected_rule_universe_for_scope, normalize_categories
+from onehaven_platform.backend.src.policy_models import PolicyCatalogEntry, PolicySource, PolicySourceVersion
+from products.compliance.backend.src.services.policy_sources.discovery_service import (
     INVENTORY_CRAWL_PENDING,
     INVENTORY_CRAWL_QUEUED,
     INVENTORY_LIFECYCLE_ACCEPTED,
@@ -34,15 +34,15 @@ from app.products.compliance.services.policy_sources.discovery_service import (
     upsert_discovery_candidate_inventory,
     upsert_source_inventory_record,
 )
-from app.services.policy_crawl_service import sync_crawl_result_to_inventory
-from app.services.policy_change_detection_service import (
+from products.compliance.backend.src.services.policy_crawl_service import sync_crawl_result_to_inventory
+from products.compliance.backend.src.services.policy_change_detection_service import (
     build_source_change_summary,
     compute_next_retry_due,
     determine_source_refresh_state,
 )
 
-from app.services.policy_catalog import catalog_mi_authoritative, catalog_municipalities
-from app.products.compliance.services.policy_sources.catalog_admin_service import merged_catalog_for_market as merged_catalog_for_market_admin
+from products.compliance.backend.src.services.policy_catalog import catalog_mi_authoritative, catalog_municipalities
+from products.compliance.backend.src.services.policy_sources.catalog_admin_service import merged_catalog_for_market as merged_catalog_for_market_admin
 
 
 DISCOVERY_ALLOWED_SOURCE_KINDS: set[str] = {
@@ -1573,7 +1573,7 @@ def merged_catalog_for_market(
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
 ) -> list[PolicyCatalogEntry]:
-    from app.products.compliance.services.policy_sources.catalog_admin_service import merged_catalog_for_market as _merged_catalog_for_market
+    from products.compliance.backend.src.services.policy_sources.catalog_admin_service import merged_catalog_for_market as _merged_catalog_for_market
 
     return _merged_catalog_for_market(
         db,

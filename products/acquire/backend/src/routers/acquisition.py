@@ -5,9 +5,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal
-from app.db import get_db
-from app.schemas import (
+from onehaven_platform.backend.src.auth import get_principal
+from onehaven_platform.backend.src.db import get_db
+from onehaven_platform.backend.src.schemas import (
     AcquisitionDeadlineUpsert,
     AcquisitionDocumentCreate,
     AcquisitionFieldOverrideIn,
